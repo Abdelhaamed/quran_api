@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="normalize.css" />
+    <link rel="stylesheet" href="main.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400..700&family=Reem+Kufi:wght@400..700&display=swap"
+        rel="stylesheet">
+        <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
+    <title>quran</title>
+</head>
+<body>
+
+    <div class="header"> 
+
+        <div class="aya"> ﴾ وَإِذَا قُرِئَ ٱلۡقُرۡءَانُ فَٱسۡتَمِعُواْ لَهُۥ وَأَنصِتُواْ لَعَلَّكُمۡ تُرۡحَمُونَ ﴿</div>
+        <div class="image"><img src="image/people-celebrating-ramadan-together.jpg" alt=""></div>
+       
+    </div>
+        <div class="asma">
+        <h1>جميع قراء القران الكريم</h1>
+        <div id="all" class="all">
+            
+        </div>
+    
+    </div>
+            <div class="rya">
+                <h1>اختر الروايه</h1>
+                <div id="allr" class="allr">
+                  
+                </div>
+                
+            </div>
+
+            <div class="surah">
+                <h1>اختر السوره</h1>
+                <div id="alls" class="alls">
+            
+                </div>
+            
+            </div>
+    <div class="audio">
+        <audio id="audio" controls autoplay>
+            <source class="hhh" src="" type="audio/ogg">
+            <source class="hhh" src="" type="audio/mpeg">
+            Your browser does not support the audio element.
+            </audio>
+            </div>
+            <div class="video" >
+                <h1>اختر قناه البث المباشر</h1>
+                <div class="butt">
+                    <a href="javascript:void()" onclick="playvideo('https://win.holol.com/live/sunnah/playlist.m3u8')">قناه السنه النبويه</a>
+                <a href="javascript:void()" onclick="playvideo('https://win.holol.com/live/quran/playlist.m3u8')">قناه القران الكريم</a>
+             </div>
+                <div class="image">
+            <img src="image/illuminated-minaret-symbolizes-spirituality-famous-blue-mosque-generated-by-ai.jpg" alt="">
+        </div>
+       <video  controls autoplay id="videochanel"   >
+        <source src="" type="video/mp4">
+        <source src="" type="video/ogg">
+        Your browser does not support the video tag.
+    </video>
+    </div>
+
+    <script src="main.js"></script>
+</body>
+</html>
