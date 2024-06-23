@@ -1,5 +1,5 @@
 body{
-    font-family: "Reem Kufi", sans-serif;
+    font-family: "Amiri", serif;
         font-optical-sizing: auto;
         font-weight:bold;
         font-style: normal;
@@ -15,7 +15,7 @@ position: relative;
     
     font-weight: bold;
     text-align: center;
-    font-size: 60PX;
+    font-size: 50px;
     position: absolute;
     margin: 0 5px;
         top: 50%;
@@ -23,6 +23,7 @@ position: relative;
         transform: translate(-50%);
         color: aqua;
         width: 90%;
+        line-height: 110px;
         
 }
 
@@ -37,7 +38,7 @@ position: relative;
     margin:25px auto;
     color: white;
     font-size: 3em;
-    width: 90%;
+    width: 85%;
 
 }
 
@@ -47,9 +48,9 @@ position: relative;
     background-color: aqua;
     border-radius: 10px;
     color: rgb(62, 59, 59);
-    width: 90px;
-    height: 50px;
-    padding: 5px;
+    width: 60px;
+    height: fit-content;
+    padding: 15px;
     margin: 10px ;
     font-size: 15px;
     text-align: center;
@@ -102,9 +103,9 @@ position: relative;
     background-color: aqua;
     border-radius: 10px;
     color: rgb(62, 59, 59);
-    width: 90px;
-    height: 50px;
-    padding: 5px;
+    width: fit-content;
+    height: fit-content;
+    padding: 15px;
     margin: 10px;
     font-size: 15px;
     text-align: center;
@@ -260,3 +261,49 @@ position: relative;
                             color: aqua;
                     
                 }
+
+                        #myBtn {
+                        display: none;
+                        position: fixed;
+                        bottom: 20px;
+                        right: 30px;
+                        z-index: 99;
+                        border: none;
+                        background-color: white;
+                        color: black;
+                        cursor: pointer;
+                        padding: 15px;
+                        border-radius: 15px;
+                        width: 100px;
+                        height: 45px;
+
+                        }
+
+                      .search{
+
+                          width: 80%;
+                          text-align: center;
+                          margin: auto;
+
+                          
+                      }  
+                        input {
+                        height: 35px;
+                        border: none;
+                        color: #fff;
+                        background-color: black;
+                        padding: 2px 0px 2px 3px;
+                        margin: 5px auto ;
+                        border-radius: 10px;
+                        outline: none;
+                        transition: 1s;
+                        text-align:center;
+                        
+                    }
+                    
+                    input:focus {
+                    border: none;
+                    outline: none;
+                    transform: scale(1.1);
+                }
+                    

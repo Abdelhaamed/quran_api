@@ -9,7 +9,27 @@ async function reciters() {
         
     });
         
-    const choseqare = chosereciters.querySelectorAll(".qare");
+  const choseqare = chosereciters.querySelectorAll(".qare");
+  
+//search
+
+const inputsearch = document.getElementById("search");
+inputsearch.addEventListener('input', function () {
+  const searchqare = inputsearch.value;
+  console.log(choseqare);
+  choseqare.forEach(qare => {
+    const childtext = qare.textContent;
+    if (childtext.includes(searchqare)) {
+      qare.style.display = 'block';
+    } else {
+      qare.style.display = 'none';
+      
+    }
+  })
+   
+});
+  
+  ///////end search
     
     choseqare.forEach(qare => {
         qare.addEventListener("click", qare => getmoshaf(qare.target.id) )
@@ -118,3 +138,30 @@ hls.on(Hls.Events.MANIFEST_PARSED,function() {
 }
     
 }
+
+
+
+
+//go to top 
+function goToTop() {
+     scroll({
+        top: 0,
+        behavior: "smooth",
+    });
+   
+    // لصفحات XHTML
+}
+
+// جعل الزر مرئي عند التمرير إلى الأسفل
+window.onscroll = function() {scrollFunction()};
+
+function scrollFunction() {
+  if (document.body.scrollTop > 20 || document.documentElement.scrollTop > 20) {
+    document.getElementById("myBtn").style.display = "block";
+  } else {
+    document.getElementById("myBtn").style.display = "none";
+  }
+}
+
+
+

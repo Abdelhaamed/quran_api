@@ -5,11 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="normalize.css" />
     <link rel="stylesheet" href="main.css" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400..700&family=Reem+Kufi:wght@400..700&display=swap"
-        rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400;1,700&display=swap"
+    rel="stylesheet">
         <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 
     <title>quran</title>
@@ -24,6 +23,7 @@
     </div>
         <div class="asma">
         <h1>جميع قراء القران الكريم</h1>
+       <div class="search"> <input type="text" id="search" placeholder="ابحث عن قارئك المفضل"></div>
         <div id="all" class="all">
             
         </div>
@@ -66,7 +66,7 @@
         Your browser does not support the video tag.
     </video>
     </div>
-
+<button onclick="goToTop()" id="myBtn" title="Go to top">Top</button>
     <script src="main.js"></script>
 </body>
 </html>
