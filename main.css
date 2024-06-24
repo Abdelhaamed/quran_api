@@ -230,7 +230,7 @@ align-items: center;
                     margin: 10px auto;
                     left: 50%;
                     transform: translateX(-50%);
-                    bottom:9%;     
+                    bottom:5%;     
                     display: flex;
         
                 }
@@ -269,7 +269,7 @@ align-items: center;
                         #myBtn {
                         
                         position: fixed;
-                        bottom: 35px;
+                        bottom: 25px;
                         right: 45px;
                         z-index: 99;
                         border: none;
