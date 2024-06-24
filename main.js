@@ -169,7 +169,18 @@ hls.on(Hls.Events.MANIFEST_PARSED,function() {
     
 }
 
+/// توقف الصوت 
+    const audio = document.querySelector("#audio");
+    var video = document.getElementById('videochanel');
 
+    audio.addEventListener('play', () => {
+    video.pause(); // إيقاف تشغيل الفيديو عند تشغيل الصوت
+    });
+
+    video.addEventListener('play', () => {
+    audio.pause(); // إيقاف تشغيل الصوت عند تشغيل الفيديو
+    });
+////////////////////
 
 
 //go to top 
@@ -192,7 +203,6 @@ function scrollFunction() {
     document.getElementById("myBtn").style.display = "none";
   }
 }
-
 
 
 

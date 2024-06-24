@@ -269,7 +269,7 @@ align-items: center;
                         #myBtn {
                         
                         position: fixed;
-                        bottom: 75px;
+                        bottom: 35px;
                         right: 45px;
                         z-index: 99;
                         border: none;
