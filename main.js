@@ -16,7 +16,6 @@ async function reciters() {
 const inputsearch = document.getElementById("search");
 inputsearch.addEventListener('input', function () {
   const searchqare = inputsearch.value;
-  console.log(choseqare);
   choseqare.forEach(qare => {
     const childtext = qare.textContent;
     if (childtext.includes(searchqare)) {
@@ -30,6 +29,35 @@ inputsearch.addEventListener('input', function () {
 });
   
   ///////end search
+
+  /////اظهار المزيد 
+const showMoreButton = document.querySelector('.show-more');
+
+let displayedChildren = 40; // عدد العناصر المعروضة حاليًا
+
+showMoreButton.addEventListener('click', () => {
+  
+  displayedChildren += 40; // أضف 10 عناصر إضافية
+
+  for (let i = 0; i < choseqare.length; i++) {
+    if (i < displayedChildren) {
+      choseqare[i].style.display = 'block'; // إظهار عنصر فرعي
+    } else {
+      choseqare[i].style.display = 'none'; // إخفاء عنصر فرعي
+    }
+  }
+
+  // تحديث نص زر "إظهار المزيد" (اختياري)
+  if (displayedChildren >= choseqare.length) {
+    console.log("hhh");
+    showMoreButton.style.display = 'none';
+    showMoreButton.disabled = true; // تعطيل الزر
+  } else {
+    showMoreButton.textContent = 'إظهار المزيد';
+  }
+});
+
+/////اظهار المزيد نهايه
     
     choseqare.forEach(qare => {
         qare.addEventListener("click", qare => getmoshaf(qare.target.id) )
@@ -41,6 +69,8 @@ inputsearch.addEventListener('input', function () {
         
         
 async function getmoshaf(reciter) {
+   const sur = document.querySelector(".surah");
+    sur.style.display = "none";
     
                const choserya = document.getElementById('allr');
                const rya = document.querySelector(".rya");
@@ -162,6 +192,8 @@ function scrollFunction() {
     document.getElementById("myBtn").style.display = "none";
   }
 }
+
+
 
 
 

@@ -72,6 +72,7 @@ align-items: center;
 
 }
 .all{
+    
     display: flex;
     justify-content: center;
     flex-wrap: wrap;
@@ -313,3 +314,26 @@ align-items: center;
                     transform: scale(1.1);
                 }
                     
+
+                                .qare:nth-child(n+11) {
+                                    display: none;
+                                    /* إخفاء العناصر الإضافية */
+                                }
+                
+                                .show-more {
+                                    display: block;
+                                    margin: 20px auto;
+                                    background-color: white;
+                                        border-radius: 15px;
+                                        color: rgb(62, 59, 59);
+                                        width: fit-content;
+                                        height: fit-content;
+                                        padding: 15px;
+                                        cursor: pointer;
+                                        border: none;
+                                        
+                                        font-size: 15px;
+                                        text-align: center;
+                                        transition: 0.5s;
+                                    /* ضبط عرض ومسافة زر "إظهار المزيد" */
+                                }
