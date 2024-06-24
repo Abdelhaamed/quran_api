@@ -21,7 +21,7 @@ align-items: center;
     position: absolute;
     margin: 0 auto;
 
-        color: aqua;
+        color: #00e1ff;
         width: 90%;
         line-height: 110px;
         
@@ -266,10 +266,10 @@ align-items: center;
                 }
 
                         #myBtn {
-                        display: none;
+                        
                         position: fixed;
-                        bottom: 20px;
-                        right: 30px;
+                        bottom: 75px;
+                        right: 45px;
                         z-index: 99;
                         border: none;
                         background-color: white;
@@ -284,9 +284,8 @@ align-items: center;
 
                       .search{
 
-                          max-width: 80%;
-                          text-align: center;
-                          margin: auto;
+                          
+                          
                           display: flex;
                           justify-content: center;
                           align-items: center;
@@ -298,12 +297,13 @@ align-items: center;
                         border: none;
                         color: #fff;
                         background-color: black;
-                        padding: 2px 0px 2px 3px;
+                        padding: 2px;
                         margin: 5px auto ;
                         border-radius: 10px;
                         outline: none;
                         transition: 1s;
                         text-align:center;
+                        width: 60% ;
                         
                     }
                     
