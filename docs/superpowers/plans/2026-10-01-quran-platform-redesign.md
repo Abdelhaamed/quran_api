@@ -18,6 +18,7 @@
 - Exactly one `<audio>` element for the entire session. Never `new Audio()`. Never `AudioContext` or `createMediaElementSource`.
 - No `crossOrigin` on the audio element — direct `<audio src>` needs no CORS, and setting it adds a failure mode.
 - Audio never enters the Cache Storage. Media is `NetworkOnly`.
+- `navigateFallback` must be explicitly `null` and `includeManifestIcons` explicitly `false`: vite-plugin-pwa's own defaults would register a `NavigationRoute` that shadows the `pages-v1` route and precache every icon twice.
 - `surah_list` comes from the selected moshaf, never from the global surah list.
 - Favorites key is `${surahId}:${moshafId}` because `moshaf.id` is globally unique (verified 287/287).
 - Recitation style is parsed from `moshaf.name`, never from `moshaf_type` (opaque codes: 11, 222, 213).
@@ -64,7 +65,7 @@
 
 **Files:**
 - Create: `package.json`, `vite.config.js`, `.gitignore`, `.github/workflows/deploy.yml`
-- Create: `public/icons/icon.svg`, `scripts/generate-icons.mjs`, `public/.nojekyll`
+- Create: `public/icons/icon.svg`, `public/favicon.svg`, `scripts/generate-icons.mjs`, `public/.nojekyll`
 - Create: `src/styles/tokens.css`, `src/styles/base.css`
 - Delete: `normalize.css`, `main.css`, `main.js`, `image/`
 
@@ -271,7 +272,10 @@ Expected: prints `icons written to public/icons`; four PNGs exist. Commit them s
 
 - [ ] **Step 6: Create `vite.config.js`**
 
-Run: `npm run build`, then `Select-String -Path dist/sw.js -Pattern 'API_ORIGIN'` and confirm it matches **nothing**. A free `API_ORIGIN` in the generated service worker means a Workbox `urlPattern` closed over a build-time constant and will throw `ReferenceError` on every request.
+Run: `npm run build`, then verify the generated `dist/sw.js`:
+- `Select-String -Path dist/sw.js -Pattern 'API_ORIGIN' -SimpleMatch` matches **nothing** (a free `API_ORIGIN` means a `urlPattern` closed over a build-time constant and will throw `ReferenceError` on every request)
+- `Select-String -Path dist/sw.js -Pattern 'NavigationRoute' -SimpleMatch` matches **nothing** (it would shadow the `pages-v1` route)
+- each of `icons/icon-192.png`, `icons/icon-512.png`, `icons/maskable-512.png`, `icons/apple-touch-icon.png` appears exactly once in the precache list
 
 ```js
 import { defineConfig } from 'vite';
@@ -292,6 +296,10 @@ export default defineConfig({
     VitePWA({
       registerType: 'prompt',
       injectRegister: false,
+      // globPatterns already matches everything in public/, so letting the
+      // plugin inject manifest.icons as additionalManifestEntries too would
+      // precache those icons twice.
+      includeManifestIcons: false,
       manifest: {
         name: 'القرآن الكريم',
         short_name: 'القرآن',
@@ -313,10 +321,12 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2,png}'],
         cleanupOutdatedCaches: true,
-        // No navigateFallback: registering one adds a NavigationRoute that is
-        // matched BEFORE any explicit navigate route, silently shadowing it.
-        // This app has exactly one document and no router, so navigations are
-        // served from cache explicitly below instead.
+        // Both keys below must be explicit. vite-plugin-pwa defaults
+        // navigateFallback to 'index.html', so merely omitting it still emits a
+        // NavigationRoute ahead of runtimeCaching and shadows the pages-v1 route.
+        navigateFallback: null,
+        // Navigations are served from cache explicitly below: this app has
+        // exactly one document and no router.
         runtimeCaching: [
           {
             urlPattern: ({ url, request }) =>
@@ -376,7 +386,7 @@ Audio URLs live on `server*.mp3quran.net` and `backup.qurango.net`, which match 
 
 `index.html` in Task 6 references `/quran_api/favicon.svg`, so it must exist.
 
-- [ ] **Step 7: Create `.gitignore`**
+- [ ] **Step 8: Create `.gitignore`**
 
 ```
 node_modules/
@@ -387,7 +397,7 @@ dev-dist/
 .DS_Store
 ```
 
-- [ ] **Step 9: Create `.github/workflows/deploy.yml`**
+- [ ] **Step 8: Create `.github/workflows/deploy.yml`**
 
 ```yaml
 name: Deploy to GitHub Pages
@@ -435,14 +445,14 @@ jobs:
         uses: actions/deploy-pages@v5.0.1
 ```
 
-- [ ] **Step 10: Remove legacy files**
+- [ ] **Step 9: Remove legacy files**
 
 ```bash
 git rm -q normalize.css main.css main.js
 git rm -rq image
 ```
 
-- [ ] **Step 11: Verify the empty shell builds and serves**
+- [ ] **Step 10: Verify the empty shell builds and serves**
 
 Temporarily create `index.html`:
 
@@ -457,17 +467,20 @@ Temporarily create `index.html`:
 Run: `npm run build` then `npm run preview -- --port 4173`
 Expected: build prints `dist/index.html`; preview serves on 4173. Confirm `dist/index.html` contains `/quran_api/` asset paths and `dist/sw.js` plus `dist/manifest.webmanifest` exist.
 
-- [ ] **Step 12: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add -A
 git commit -m "chore: scaffold Vite project with PWA config and design tokens
 
 Sets base to /quran_api/ so GitHub Pages serves assets from the
-subpath. Workbox applies NetworkFirst to navigations, StaleWhileRevalidate
-to mp3quran JSON, and CacheFirst to hashed assets; no route matches
-audio URLs so media stays NetworkOnly. Removes the 15.5MB image
-directory and the normalize.css/main.css/main.js trio."
+subpath. Navigations and hashed assets are CacheFirst, mp3quran JSON is
+StaleWhileRevalidate, and no route matches audio URLs so media stays
+NetworkOnly. navigateFallback is pinned to null because the plugin
+defaults it to index.html, which would register a NavigationRoute ahead
+of runtimeCaching and shadow the pages route. includeManifestIcons is
+false because globPatterns already precaches the icons. Removes the
+15.5MB image directory and the normalize.css/main.css/main.js trio."
 ```
 
 ---
