@@ -4,10 +4,11 @@
   --bg-elevated: #2e2828;
   --surface: #353030;
   --surface-hover: #3f3939;
-  --border: #4a4444;
+  /* Decorative card boundaries only; interactive boundaries use --accent. */
+  --border: #6b625c;
   --text: #f5f0e9;
   --text-muted: #b5aca3;
-  --text-faint: #857c74;
+  --text-faint: #9a9088;
   --accent: #00d4e6;
   --accent-strong: #6ff0ff;
   --accent-contrast: #06252a;
@@ -23,8 +24,14 @@
 
   --font-quran: 'Amiri', serif;
   --font-ui: 'IBM Plex Sans Arabic', system-ui, sans-serif;
-  --fs-xs: 12px; --fs-sm: 14px; --fs-base: 16px;
-  --fs-lg: 20px; --fs-xl: 26px; --fs-2xl: 34px;
+  /* rem, not px, so a user who raises the browser's default font size
+     actually gets larger text. */
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.875rem;
+  --fs-base: 1rem;
+  --fs-lg: 1.25rem;
+  --fs-xl: 1.625rem;
+  --fs-2xl: 2.125rem;
 
   --tap: 48px;
   --tap-lg: 64px;
@@ -41,14 +48,17 @@
   --bg-elevated: #ffffff;
   --surface: #ffffff;
   --surface-hover: #f0ebe3;
-  --border: #e2dbd0;
+  /* Decorative card boundaries only. Interactive boundaries use --accent.
+     1.85:1 on --bg, deliberately below the 3:1 of WCAG 1.4.11, which governs
+     user-interface components rather than containers. */
+  --border: #c4b79f;
   --text: #1f1a18;
   --text-muted: #5c534c;
-  --text-faint: #8a8078;
-  --accent: #0092a3;
-  --accent-strong: #00707e;
+  --text-faint: #77604a;
+  --accent: #007785;
+  --accent-strong: #006b78;
   --accent-contrast: #ffffff;
-  --gold: #a97f2f;
+  --gold: #8a6a24;
   --danger: #c0392b;
   --shadow: 0 2px 12px rgb(31 26 24 / .10);
   --scrim: rgb(31 26 24 / .35);

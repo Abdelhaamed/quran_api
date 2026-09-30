@@ -45,16 +45,20 @@ export default defineConfig({
         // navigateFallback to 'index.html', so merely omitting it still emits a
         // NavigationRoute ahead of runtimeCaching and shadows the pages-v1 route.
         navigateFallback: null,
-        // Navigations are served from cache explicitly below: this app has
-        // exactly one document and no router.
+        // Navigations are NetworkFirst with a 3s timeout so a fresh shell is
+        // picked up after a deploy. CacheFirst would pin the old index.html for
+        // the full maxAgeSeconds, because cleanupOutdatedCaches only removes
+        // caches whose name contains '-precache-' and so never prunes
+        // pages-v1/api-v1/assets-v1 across service-worker versions.
         runtimeCaching: [
           {
             urlPattern: ({ url, request }) =>
               request.mode === 'navigate' &&
               url.origin === self.location.origin,
-            handler: 'CacheFirst',
+            handler: 'NetworkFirst',
             options: {
               cacheName: 'pages-v1',
+              networkTimeoutSeconds: 3,
               expiration: { maxEntries: 4, maxAgeSeconds: 604800 },
               cacheableResponse: { statuses: [0, 200] },
             },
@@ -64,7 +68,15 @@ export default defineConfig({
             // the service worker, so it may NOT close over a build-time
             // constant: it would become a free variable and throw
             // ReferenceError on every request. Inline the literal.
-            urlPattern: ({ url }) => url.origin === 'https://mp3quran.net',
+            //
+            // hostname is used rather than origin.endsWith, because
+            // `https://notmp3quran.net` also ends with 'mp3quran.net'.
+            // The .mp3 exclusion makes "audio is never cached" structural
+            // rather than incidental: surah audio lives on
+            // server*.mp3quran.net, which would otherwise match this rule.
+            urlPattern: ({ url }) =>
+              (url.hostname === 'mp3quran.net' || url.hostname.endsWith('.mp3quran.net')) &&
+              !url.pathname.endsWith('.mp3'),
             handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'api-v1',
