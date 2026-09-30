@@ -314,7 +314,7 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2,png}'],
         cleanupOutdatedCaches: true,
-        navigateFallback: null,
+        navigateFallback: 'index.html',
         runtimeCaching: [
           {
             urlPattern: ({ url, request }) =>
@@ -349,8 +349,11 @@ export default defineConfig({
             },
           },
         ],
-        // Audio must never be cached: streams are large and would break seeking.
-        navigateFallbackDenylist: [/^\/quran_api\/.*\.(mp3|m3u8)$/],
+        // The urlPattern predicates above are serialized into sw.js and run
+        // inside the service worker, where `self` is ServiceWorkerGlobalScope
+        // and `.location.origin` is the site's own origin.
+        // No route below matches *.mp3, so audio stays NetworkOnly and
+        // range-based seeking keeps working. Do not add one.
       },
     }),
   ],
@@ -458,15 +461,16 @@ directory and the normalize.css/main.css/main.js trio."
 ## Task 2: Pure Logic (TDD)
 
 **Files:**
-- Create: `src/utils/arabic.js`, `src/audio/queue.js`, `src/utils/favorites.js`
-- Create: `test/arabic.test.js`, `test/queue.test.js`, `test/favorites.test.js`
+- Create: `src/utils/arabic.js`, `src/audio/queue.js`, `src/utils/favorites.js`, `src/utils/ayah-counts.js`
+- Create: `test/arabic.test.js`, `test/queue.test.js`, `test/favorites.test.js`, `test/ayah-counts.test.js`
 
 **Interfaces:**
 - Produces: `normalize(text: string): string`
 - Produces: `createQueue()` → `{ setPlaylist, setIndexBySurah, current, next, prev, size, index }`
 - Produces: `favoriteKey(surahId, moshafId): string`, `isFavorite(list, surahId, moshafId): boolean`, `toggleFavorite(list, entry): array`, `sortForPlayback(list): array`
+- Produces: `AYAH_COUNTS` — `Record<number, number>` keyed by surah id, index 0 unused
 
-All three modules are DOM-free and import nothing.
+All four modules are DOM-free and import nothing.
 
 - [ ] **Step 1: Write `test/arabic.test.js`**
 
@@ -775,21 +779,93 @@ export function removeFavorite(list, surahId, moshafId) {
 }
 ```
 
-- [ ] **Step 10: Run all tests**
+- [ ] **Step 10: Create `src/utils/ayah-counts.js`**
+
+The mp3quran `suwar` endpoint returns no ayah count. Rather than add a second
+network dependency for 114 immutable integers, ship them as a table. Counts were
+cross-checked against the canonical total of 6236 ayat.
+
+```js
+/**
+ * Ayah count per surah id, index 0 unused. mp3quran's `suwar` endpoint has no
+ * ayah count field, and these are immutable reference data, so a table beats a
+ * second runtime dependency. Verified: 114 entries summing to exactly 6236.
+ */
+const COUNTS = [
+  0, 7, 286, 200, 176, 165, 206, 75, 129, 109, 123, 111, 43, 52, 99, 128,
+  111, 110, 98, 135, 112, 78, 118, 64, 77, 227, 93, 88, 69, 60, 34, 30,
+  73, 54, 45, 83, 182, 88, 75, 85, 54, 53, 89, 59, 37, 35, 38, 29, 18,
+  45, 60, 49, 62, 55, 78, 96, 29, 22, 24, 13, 14, 11, 11, 18, 12,
+  12, 30, 52, 52, 44, 28, 28, 20, 56, 40, 31, 50, 40, 46, 42, 29,
+  19, 36, 25, 22, 17, 19, 26, 30, 20, 15, 21, 11, 8, 8, 19, 5,
+  8, 8, 11, 11, 8, 3, 9, 5, 4, 7, 3, 6, 3, 5, 4, 5, 6,
+];
+
+export const AYAH_COUNTS = Object.freeze(
+  Object.fromEntries(COUNTS.map((n, id) => [id, n]).filter(([id]) => id > 0)),
+);
+
+export function ayahCount(surahId) {
+  return AYAH_COUNTS[surahId] ?? 0;
+}
+```
+
+- [ ] **Step 11: Write `test/ayah-counts.test.js`**
+
+```js
+import { describe, it, expect } from 'vitest';
+import { AYAH_COUNTS, ayahCount } from '../src/utils/ayah-counts.js';
+
+describe('AYAH_COUNTS', () => {
+  it('covers all 114 surahs', () => {
+    expect(Object.keys(AYAH_COUNTS)).toHaveLength(114);
+  });
+
+  it('sums to the canonical total of 6236 ayat', () => {
+    const total = Object.values(AYAH_COUNTS).reduce((a, b) => a + b, 0);
+    expect(total).toBe(6236);
+  });
+
+  it('has known values for landmark surahs', () => {
+    expect(ayahCount(1)).toBe(7);
+    expect(ayahCount(2)).toBe(286);
+    expect(ayahCount(18)).toBe(110);
+    expect(ayahCount(114)).toBe(6);
+  });
+
+  it('never returns zero for a real surah', () => {
+    for (let id = 1; id <= 114; id += 1) expect(ayahCount(id)).toBeGreaterThan(0);
+  });
+
+  it('returns 0 for an unknown surah', () => {
+    expect(ayahCount(0)).toBe(0);
+    expect(ayahCount(115)).toBe(0);
+  });
+
+  it('is frozen so no module can mutate the table', () => {
+    expect(Object.isFrozen(AYAH_COUNTS)).toBe(true);
+  });
+});
+```
+
+- [ ] **Step 12: Run all tests**
 
 Run: `npm test`
-Expected: 3 files, 22 tests, all passing.
+Expected: 4 files pass and the command exits 0. Assert exit code, not a literal
+test count — the counts above are illustrative.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 13: Commit**
 
 ```bash
-git add src/utils/arabic.js src/audio/queue.js src/utils/favorites.js test/
-git commit -m "feat: add pure Arabic normalization, queue, and favorites logic
+git add src/utils/arabic.js src/audio/queue.js src/utils/favorites.js src/utils/ayah-counts.js test/
+git commit -m "feat: add pure Arabic normalization, queue, favorites, and ayah counts
 
 Arabic folding matters for search: without it the query 'احمد' never
 matches 'أحمد' and 'فاطمه' never matches 'فاطمة'. Favorites key on
 surahId:moshafId because moshaf.id is globally unique across all 287
-entries, so the same surah by two reciters stays two records."
+entries, so the same surah by two reciters stays two records. Ayah counts
+are a frozen table because mp3quran's suwar endpoint omits them and 114
+immutable integers do not justify a second runtime dependency."
 ```
 
 ---
@@ -897,12 +973,15 @@ export async function getReciters(signal) {
 
 export async function getSuwar(signal) {
   const data = await getJSON('/suwar?language=ar', { signal });
+  // Verified field names: id, name, start_page, end_page, makkia, type.
+  // makkia is 1 for Meccan / 0 for Medinan. `type` is its exact inverse, so
+  // it is ignored. The endpoint carries no ayah count — see utils/ayah-counts.js.
   return (data.suwar || []).map((s) => ({
     id: Number(s.id),
     name: s.name,
-    makyi: s.makyi,
-    pageStart: s.page_start,
-    pageEnd: s.page_end,
+    isMeccan: Number(s.makkia) === 1,
+    pageStart: Number(s.start_page),
+    pageEnd: Number(s.end_page),
   }));
 }
 
@@ -1806,31 +1885,26 @@ export function createRecitersView({ root, store, onSelect }) {
       return;
     }
 
-    const frag = document.createDocumentFragment();
-    for (const r of list) {
+    const nodes = list.map((r) => {
       const selected = r.moshaf.some((m) => m.id === s.selectedMoshafId);
       const chips = r.moshaf.length
-        ? frag2(r.moshaf.map((m) => h('span', { class: 'chip' }, m.style || m.name)))
+        ? frag(r.moshaf.map((m) =>
+            h('span', { class: 'chip' }, m.style || m.name)))
         : h('span', { class: 'chip muted' }, 'لا روايات');
 
-      const card = h('button', {
+      return h('button', {
         class: `card reciter${selected ? ' is-selected' : ''}`,
         type: 'button',
         onclick: () => onSelect(r),
       },
         h('span', { class: 'reciter-name' }, r.name),
-        h('span', { class: 'reciter-meta' }, `${r.moshaf.length} رواية · ${r.moshaf[0]?.surahTotal || 0} سورة`),
+        h('span', { class: 'reciter-meta' },
+          `${r.moshaf.length} رواية · ${r.moshaf[0]?.surahTotal || 0} سورة`),
         chips);
-      frag.append(card);
-    }
-    grid.append(frag);
-  }
+    });
 
-  const frag2 = (nodes) => {
-    const f = document.createDocumentFragment();
-    for (const n of nodes) f.append(n);
-    return f;
-  };
+    grid.replaceChildren(frag(nodes));
+  }
 
   store.subscribe((s, keys) => {
     if (keys.has('reciters') || keys.has('query') || keys.has('selectedMoshafId')) render();
@@ -1843,9 +1917,10 @@ export function createRecitersView({ root, store, onSelect }) {
 - [ ] **Step 4: Create `src/ui/surahs.js`**
 
 ```js
-import { h } from '../utils/dom.js';
+import { h, frag } from '../utils/dom.js';
 import { matchesAll } from '../utils/arabic.js';
 import { isFavorite } from '../utils/favorites.js';
+import { AYAH_COUNTS } from '../utils/ayah-counts.js';
 
 export function createSurahsView({ root, store, onPlay, onToggleFavorite }) {
   const grid = h('div', { class: 'grid grid-surahs' });
@@ -1857,34 +1932,44 @@ export function createSurahsView({ root, store, onPlay, onToggleFavorite }) {
     grid.replaceChildren();
 
     if (!moshaf) {
-      grid.append(h('p', { class: 'empty' }, 'اختر قارئاً من تبويب «القرّاء» أولاً لعرض سوره'));
+      grid.append(h('p', { class: 'empty' },
+        'اختر قارئاً من تبويب «القرّاء» أولاً لعرض سوره'));
       return;
     }
 
     const ids = s.query
-      ? moshaf.surahList.filter((id) => matchesAll(s.suwarById.get(id)?.name || '', s.query))
+      ? moshaf.surahList.filter((id) =>
+          matchesAll(s.suwarById.get(id)?.name || '', s.query))
       : moshaf.surahList;
 
     if (ids.length === 0) {
-      grid.append(h('p', { class: 'empty' }, s.reciters.length ? 'لا نتائج مطابقة' : 'جارٍ التحميل…'));
+      grid.append(h('p', { class: 'empty' },
+        s.suwarById.size ? 'لا نتائج مطابقة' : 'جارٍ التحميل…'));
       return;
     }
 
-    const frag = document.createDocumentFragment();
-    for (const id of ids) {
+    const nodes = ids.map((id) => {
       const meta = s.suwarById.get(id);
       const fav = isFavorite(s.favorites, id, moshaf.id);
-      const card = h('div', {
-        class: `card surah${s.playback?.surahId === id && s.playback?.moshafId === moshaf.id ? ' is-playing' : ''}`,
+      const isNow = s.playback?.kind === 'surah' &&
+        s.playback.surahId === id && s.playback.moshafId === moshaf.id;
+
+      return h('div', {
+        class: `card surah${isNow ? ' is-playing' : ''}`,
         role: 'button',
         tabindex: '0',
         onclick: () => onPlay(id),
-        onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPlay(id); } },
+        onkeydown: (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPlay(id); }
+        },
       },
-        h('span', { class: 'surah-num' }, meta?.makyi === 'مكية' ? '' : 'مدنية'),
+        h('span', { class: 'surah-place' },
+          meta?.isMeccan ? 'مكية' : 'مدنية'),
         h('span', { class: 'surah-name' }, meta?.name || `سورة ${id}`),
-        h('span', { class: 'surah-count' }, meta?.makyi === 'مكية' ? '' : ''),
-        h('span', { class: 'ayah-badge' }, String(id)),
+        h('span', { class: 'ayah-badge', 'aria-hidden': 'true' },
+          String(AYAH_COUNTS[id] ?? '')),
+        h('span', { class: 'ayah-label' },
+          `${AYAH_COUNTS[id] ?? '؟'} آية`),
         h('button', {
           class: `heart${fav ? ' is-on' : ''}`,
           type: 'button',
@@ -1893,9 +1978,9 @@ export function createSurahsView({ root, store, onPlay, onToggleFavorite }) {
           onclick: (e) => { e.stopPropagation(); onToggleFavorite(id); },
           html: fav ? '&#9829;' : '&#9825;',
         }));
-      frag.append(card);
-    }
-    grid.append(frag);
+    });
+
+    grid.replaceChildren(frag(nodes));
   }
 
   store.subscribe((s, keys) => {
@@ -1906,8 +1991,6 @@ export function createSurahsView({ root, store, onPlay, onToggleFavorite }) {
   return { render };
 }
 ```
-
-Replace the placeholder `surah-num`, `surah-count`, and `ayah-badge` content: `ayah-badge` shows the surah's ordinal inside the decorative circle, and `surah-count` shows the ayah count once `getSuwar()` is confirmed to include it. If the API does not return ayah counts, render the makyi/madani label only and drop `surah-count`.
 
 - [ ] **Step 5: Create `src/ui/favorites.js`**
 
@@ -2078,11 +2161,13 @@ Append to `src/styles/components.css`:
   font-size: var(--fs-xs); margin-inline-end: var(--sp-1); }
 .chip.muted { background: var(--surface-hover); color: var(--text-faint); }
 
-.surah { place-items: center; text-align: center; padding: var(--sp-3); }
+.surah { place-items: center; text-align: center; padding: var(--sp-3); gap: var(--sp-1); }
+.surah-place { font-size: var(--fs-xs); color: var(--text-faint); }
 .surah-name { font-family: var(--font-quran); font-size: var(--fs-lg); font-weight: 700; }
-.ayah-badge { inline-size: 34px; block-size: 34px; display: grid; place-items: center;
+.ayah-badge { inline-size: 36px; block-size: 36px; display: grid; place-items: center;
   border: 1px solid var(--gold); border-radius: var(--r-full); color: var(--gold);
-  font-size: var(--fs-xs); }
+  font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.ayah-label { font-size: var(--fs-xs); color: var(--text-muted); }
 .surah.is-playing { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .heart { position: absolute; inset-block-start: var(--sp-1); inset-inline-end: var(--sp-1);
   inline-size: var(--tap); block-size: var(--tap); font-size: var(--fs-lg);
@@ -2157,9 +2242,14 @@ const store = createStore({
 const queue = createQueue();
 const engine = createEngine();
 
-const moshafOf = (id) => store.getState().reciters
-  .flatMap((r) => r.moshaf.map((m) => ({ ...m, reciterName: r.name })))
-  .find((m) => m.id === id) || null;
+const moshafIndex = new Map();
+function indexMoshaf(reciters) {
+  moshafIndex.clear();
+  for (const r of reciters) {
+    for (const m of r.moshaf) moshafIndex.set(m.id, { ...m, reciterName: r.name });
+  }
+}
+const moshafOf = (id) => moshafIndex.get(id) || null;
 
 function resolveMoshaf() {
   const s = store.getState();
@@ -2168,21 +2258,29 @@ function resolveMoshaf() {
   if (moshaf) queue.setPlaylist(buildPlaylist(moshaf, s.suwarById));
 }
 
-function playSurah(surahId, { fromFavorite } = {}) {
+function playSurah(surahId) {
   const s = store.getState();
-  const moshaf = fromFavorite
-    ? { ...fromFavorite, reciterName: fromFavorite.reciterName }
-    : s.selectedMoshaf;
+  const moshaf = s.selectedMoshaf;
   if (!moshaf) return;
 
-  queue.setPlaylist(fromFavorite
-    ? buildPlaylist(moshaf, s.suwarById)
-    : queue.items());
-  queue.setIndexBySurah(surahId);
+  // Only rebuild the queue from the moshaf when this surah is inside it.
+  // A favorite may point at a moshaf the user has not selected.
+  if (queue.setIndexBySurah(surahId) === -1) {
+    queue.setPlaylist(buildPlaylist(moshaf, s.suwarById));
+    if (queue.setIndexBySurah(surahId) === -1) {
+      store.setState({
+        playback: {
+          kind: 'surah', surahId, moshafId: moshaf.id, url: '',
+          title: s.suwarById.get(surahId)?.name || `سورة ${surahId}`,
+          reciterName: moshaf.reciterName, riwayaName: moshaf.name,
+          isPlaying: false, isFavorite: false, error: 'هذه السورة غير متوفرة لهذا القارئ',
+        },
+      });
+      return;
+    }
+  }
 
   const cur = queue.current();
-  if (!cur) return;
-
   const isFav = isFavorite(s.favorites, surahId, moshaf.id);
   store.setState({
     playback: {
@@ -2197,11 +2295,28 @@ function playSurah(surahId, { fromFavorite } = {}) {
   });
 }
 
+/** Plays a saved favorite, switching to that reciter's own playlist. */
+function playFavorite(fav) {
+  const s = store.getState();
+  const moshaf = moshafOf(fav.moshafId);
+  if (!moshaf) {
+    qs('#toast').textContent = 'القارئ لم يعد متوفراً';
+    const t = qs('#toast'); t.hidden = false;
+    clearTimeout(t._timer); t._timer = setTimeout(() => { t.hidden = true; }, 2200);
+    return;
+  }
+  store.setState({ selectedMoshafId: fav.moshafId });
+  writeState({ selectedMoshafId: fav.moshafId });
+  resolveMoshaf();
+  playSurah(fav.surahId);
+}
+
 function playRadio(radio) {
   store.setState({
     playback: {
       kind: 'radio', url: radio.url, title: radio.name,
-      reciterName: 'بث مباشر', isPlaying: true, isFavorite: false, seekable: false,
+      reciterName: 'بث مباشر', isPlaying: true, isFavorite: false,
+      seekable: false, error: null,
     },
   });
   engine.play({ url: radio.url, title: radio.name, artist: 'بث مباشر', kind: 'radio', seekable: false });
@@ -2229,6 +2344,7 @@ function toggleCurrentFavorite() {
 }
 
 function toggleSurah(surahId, moshafId) {
+  if (moshafId == null) return;
   const s = store.getState();
   const moshaf = moshafOf(moshafId);
   const meta = s.suwarById.get(surahId);
@@ -2246,8 +2362,8 @@ function toggleSurah(surahId, moshafId) {
     playback: s.playback?.surahId === surahId && s.playback?.moshafId === moshafId
       ? { ...s.playback, isFavorite: stillFav } : s.playback,
   });
-  qs('#toast').textContent = stillFav ? 'أُضيفت إلى المفضلة' : 'أُزيلت من المفضلة';
   const t = qs('#toast');
+  t.textContent = stillFav ? 'أُضيفت إلى المفضلة' : 'أُزيلت من المفضلة';
   t.hidden = false;
   clearTimeout(t._timer);
   t._timer = setTimeout(() => { t.hidden = true; }, 1800);
@@ -2257,13 +2373,40 @@ function playAllFavorites() {
   const s = store.getState();
   const ordered = sortForPlayback(s.favorites);
   if (ordered.length === 0) return;
-  const moshafById = new Map(
-    s.reciters.flatMap((r) => r.moshaf.map((m) => [m.id, { ...m, reciterName: r.name }])));
-  queue.setPlaylist(ordered.map((f) => {
-    const m = moshafById.get(f.moshafId);
-    return { surahId: f.surahId, title: f.surahName, url: surahUrl(f.server || m?.server, f.surahId) };
-  }));
-  playSurah(ordered[0].surahId);
+
+  // Play-all crosses reciters, so build one queue from the saved URLs rather
+  // than a single reciter's playlist.
+  queue.setPlaylist(ordered.map((f) => ({
+    surahId: f.surahId,
+    title: f.surahName,
+    url: surahUrl(f.server, f.surahId),
+    fav: f,
+  })));
+  playFromQueue(0);
+}
+
+function playFromQueue(index) {
+  const item = queue.items()[index];
+  if (!item) return;
+  queue.setIndexBySurah(item.surahId);
+
+  if (item.fav) {
+    const fav = item.fav;
+    store.setState({
+      playback: {
+        kind: 'surah', surahId: fav.surahId, moshafId: fav.moshafId, url: item.url,
+        title: fav.surahName, reciterName: fav.reciterName, riwayaName: fav.riwayaName,
+        isPlaying: true, isFavorite: true, seekable: true, error: null,
+      },
+    });
+  } else {
+    playSurah(item.surahId);
+    return;
+  }
+  engine.play({
+    url: item.url, title: item.title, artist: item.fav.reciterName,
+    album: item.fav.riwayaName, kind: 'surah', seekable: true,
+  });
 }
 
 const shell = createShell({ store });
@@ -2288,7 +2431,7 @@ createSurahsView({
 
 createFavoritesView({
   root: qs('#view-favorites'), store,
-  onPlay: (f) => playSurah(f.surahId, { fromFavorite: f }),
+  onPlay: playFavorite,
   onRemove: (f) => toggleSurah(f.surahId, f.moshafId),
   onPlayAll: playAllFavorites,
 });
@@ -2310,11 +2453,47 @@ const session = createMediaSession({
   onNext: advance,
   onPrev: () => { const p = queue.prev(); if (p) playSurah(p.surahId); },
 });
-engine.on('play', () => session.setState(true));
-engine.on('pause', () => session.setState(false));
+engine.on('play', () => {
+  session.setState(true);
+  store.setState({ playback: { ...store.getState().playback, isPlaying: true, error: null } });
+});
+engine.on('pause', () => {
+  session.setState(false);
+  store.setState({ playback: { ...store.getState().playback, isPlaying: false } });
+});
 engine.on('time', ({ currentTime, duration }) =>
   session.setPosition(currentTime, duration, engine.element.playbackRate || 1));
 engine.on('ended', advance);
+engine.on('error', () => {
+  const p = store.getState().playback;
+  store.setState({
+    playback: { ...p, isPlaying: false, error: 'تعذّر تحميل السورة. تحقّق من الاتصال.' },
+  });
+  showErrorToast('تعذّر تحميل السورة', 'تخطّي', () => advance());
+});
+engine.on('blocked', () => {
+  const p = store.getState().playback;
+  store.setState({ playback: { ...p, isPlaying: false } });
+  showErrorToast('اضغط تشغيل للسماح بالصوت', 'تشغيل', () => {
+    const p2 = store.getState().playback;
+    if (p2?.url) engine.play({ ...p2, seekable: p2.kind !== 'radio' });
+  });
+});
+
+function showErrorToast(message, actionLabel, onAction) {
+  const t = qs('#toast');
+  t.replaceChildren(
+    h('span', {}, message),
+    h('button', {
+      class: 'btn-primary', type: 'button',
+      style: 'margin-inline-start:var(--sp-3)',
+      onclick: onAction,
+    }, actionLabel),
+  );
+  t.hidden = false;
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.hidden = true; t.replaceChildren(); }, 6000);
+}
 
 addEventListener('online', () => store.setState({ offline: false }));
 addEventListener('offline', () => store.setState({ offline: true }));
@@ -2330,6 +2509,7 @@ addEventListener('offline', () => store.setState({ offline: true }));
   if (cachedReciters) store.setState({ reciters: cachedReciters });
   if (cachedRadios) store.setState({ radios: cachedRadios });
   if (cachedRiwayat) store.setState({ riwayat: cachedRiwayat });
+  indexMoshaf(cachedReciters || []);
   resolveMoshaf();
 
   try {
@@ -2344,6 +2524,7 @@ addEventListener('offline', () => store.setState({ offline: true }));
       reciters, radios, riwayat,
       suwarById: new Map(suwar.map((s) => [s.id, s])),
     });
+    indexMoshaf(reciters);
     resolveMoshaf();
   } catch (err) {
     const hasCache = store.getState().reciters.length > 0;
