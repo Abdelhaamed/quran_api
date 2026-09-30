@@ -271,11 +271,11 @@ Expected: prints `icons written to public/icons`; four PNGs exist. Commit them s
 
 - [ ] **Step 6: Create `vite.config.js`**
 
+Run: `npm run build`, then `Select-String -Path dist/sw.js -Pattern 'API_ORIGIN'` and confirm it matches **nothing**. A free `API_ORIGIN` in the generated service worker means a Workbox `urlPattern` closed over a build-time constant and will throw `ReferenceError` on every request.
+
 ```js
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
-
-const API_ORIGIN = 'https://mp3quran.net';
 
 export default defineConfig({
   base: '/quran_api/',
@@ -292,7 +292,6 @@ export default defineConfig({
     VitePWA({
       registerType: 'prompt',
       injectRegister: false,
-      includeAssets: ['icons/*.png', 'favicon.svg'],
       manifest: {
         name: 'القرآن الكريم',
         short_name: 'القرآن',
@@ -314,22 +313,28 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2,png}'],
         cleanupOutdatedCaches: true,
-        navigateFallback: 'index.html',
+        // No navigateFallback: registering one adds a NavigationRoute that is
+        // matched BEFORE any explicit navigate route, silently shadowing it.
+        // This app has exactly one document and no router, so navigations are
+        // served from cache explicitly below instead.
         runtimeCaching: [
           {
             urlPattern: ({ url, request }) =>
               request.mode === 'navigate' &&
               url.origin === self.location.origin,
-            handler: 'NetworkFirst',
+            handler: 'CacheFirst',
             options: {
               cacheName: 'pages-v1',
-              networkTimeoutSeconds: 3,
-              expiration: { maxEntries: 8, maxAgeSeconds: 604800 },
+              expiration: { maxEntries: 4, maxAgeSeconds: 604800 },
               cacheableResponse: { statuses: [0, 200] },
             },
           },
           {
-            urlPattern: ({ url }) => url.origin === API_ORIGIN,
+            // The predicate below is serialized into sw.js and evaluated in
+            // the service worker, so it may NOT close over a build-time
+            // constant: it would become a free variable and throw
+            // ReferenceError on every request. Inline the literal.
+            urlPattern: ({ url }) => url.origin === 'https://mp3quran.net',
             handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'api-v1',
@@ -349,11 +354,8 @@ export default defineConfig({
             },
           },
         ],
-        // The urlPattern predicates above are serialized into sw.js and run
-        // inside the service worker, where `self` is ServiceWorkerGlobalScope
-        // and `.location.origin` is the site's own origin.
-        // No route below matches *.mp3, so audio stays NetworkOnly and
-        // range-based seeking keeps working. Do not add one.
+        // No route matches *.mp3, so audio stays NetworkOnly and range-based
+        // seeking keeps working. Do not add one.
       },
     }),
   ],
@@ -361,6 +363,18 @@ export default defineConfig({
 ```
 
 Audio URLs live on `server*.mp3quran.net` and `backup.qurango.net`, which match no route predicate above, so Workbox never intercepts them. Do not add a route that matches `*.mp3`.
+
+- [ ] **Step 7: Create `public/favicon.svg`**
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#241f1f"/>
+  <path d="M32 6 54 19v26L32 58 10 45V19Z" fill="none" stroke="#00d4e6" stroke-width="1.6" opacity=".6"/>
+  <text x="32" y="44" font-family="serif" font-size="32" fill="#f5f0e9" text-anchor="middle">ق</text>
+</svg>
+```
+
+`index.html` in Task 6 references `/quran_api/favicon.svg`, so it must exist.
 
 - [ ] **Step 7: Create `.gitignore`**
 
@@ -373,7 +387,7 @@ dev-dist/
 .DS_Store
 ```
 
-- [ ] **Step 8: Create `.github/workflows/deploy.yml`**
+- [ ] **Step 9: Create `.github/workflows/deploy.yml`**
 
 ```yaml
 name: Deploy to GitHub Pages
@@ -421,14 +435,14 @@ jobs:
         uses: actions/deploy-pages@v5.0.1
 ```
 
-- [ ] **Step 9: Remove legacy files**
+- [ ] **Step 10: Remove legacy files**
 
 ```bash
 git rm -q normalize.css main.css main.js
 git rm -rq image
 ```
 
-- [ ] **Step 10: Verify the empty shell builds and serves**
+- [ ] **Step 11: Verify the empty shell builds and serves**
 
 Temporarily create `index.html`:
 
@@ -443,7 +457,7 @@ Temporarily create `index.html`:
 Run: `npm run build` then `npm run preview -- --port 4173`
 Expected: build prints `dist/index.html`; preview serves on 4173. Confirm `dist/index.html` contains `/quran_api/` asset paths and `dist/sw.js` plus `dist/manifest.webmanifest` exist.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add -A
