@@ -73,10 +73,11 @@ export default defineConfig({
             // `https://notmp3quran.net` also ends with 'mp3quran.net'.
             // The .mp3 exclusion makes "audio is never cached" structural
             // rather than incidental: surah audio lives on
-            // server*.mp3quran.net, which would otherwise match this rule.
+            // server*.mp3quran.net, which WOULD otherwise match this rule.
+            // Lowercased so a .MP3 cannot slip past the exclusion.
             urlPattern: ({ url }) =>
               (url.hostname === 'mp3quran.net' || url.hostname.endsWith('.mp3quran.net')) &&
-              !url.pathname.endsWith('.mp3'),
+              !url.pathname.toLowerCase().endsWith('.mp3'),
             handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'api-v1',
@@ -96,8 +97,10 @@ export default defineConfig({
             },
           },
         ],
-        // No route matches *.mp3, so audio stays NetworkOnly and range-based
-        // seeking keeps working. Do not add one.
+        // Audio is never cached. mp3quran audio lives on server*.mp3quran.net,
+        // which the api-v1 predicate matches by hostname — the case-insensitive
+        // .mp3 exclusion above is what excludes it. backup.qurango.net radio
+        // streams match no route at all. Do not add a route for either.
       },
     }),
   ],
