@@ -411,7 +411,7 @@ export default defineConfig({
 });
 ```
 
-Audio URLs live on `server*.mp3quran.net` and `backup.qurango.net`, which match no route predicate above, so Workbox never intercepts them. Do not add a route that matches `*.mp3`.
+Audio URLs are never cached. Surah audio lives on `server*.mp3quran.net`, whose hostname **does** match the `api-v1` predicate — the case-insensitive `.mp3` exclusion inside that predicate is what keeps it out of the cache. Radio lives on `backup.qurango.net`, which matches no route at all. Do not add a route covering either, and do not remove that exclusion.
 
 - [ ] **Step 7: Create `public/favicon.svg`**
 
