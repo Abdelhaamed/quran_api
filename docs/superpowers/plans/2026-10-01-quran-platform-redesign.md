@@ -119,10 +119,11 @@ Expected: exit 0, no `ERESOLVE`. Then `npm ls vite vite-plugin-pwa vitest` shows
   --bg-elevated: #2e2828;
   --surface: #353030;
   --surface-hover: #3f3939;
-  --border: #4a4444;
+  /* Decorative card boundaries only; interactive boundaries use --accent. */
+  --border: #6b625c;
   --text: #f5f0e9;
   --text-muted: #b5aca3;
-  --text-faint: #857c74;
+  --text-faint: #9a9088;
   --accent: #00d4e6;
   --accent-strong: #6ff0ff;
   --accent-contrast: #06252a;
@@ -138,8 +139,14 @@ Expected: exit 0, no `ERESOLVE`. Then `npm ls vite vite-plugin-pwa vitest` shows
 
   --font-quran: 'Amiri', serif;
   --font-ui: 'IBM Plex Sans Arabic', system-ui, sans-serif;
-  --fs-xs: 12px; --fs-sm: 14px; --fs-base: 16px;
-  --fs-lg: 20px; --fs-xl: 26px; --fs-2xl: 34px;
+  /* rem, not px, so a user who raises the browser's default font size
+     actually gets larger text. */
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.875rem;
+  --fs-base: 1rem;
+  --fs-lg: 1.25rem;
+  --fs-xl: 1.625rem;
+  --fs-2xl: 2.125rem;
 
   --tap: 48px;
   --tap-lg: 64px;
@@ -156,14 +163,17 @@ Expected: exit 0, no `ERESOLVE`. Then `npm ls vite vite-plugin-pwa vitest` shows
   --bg-elevated: #ffffff;
   --surface: #ffffff;
   --surface-hover: #f0ebe3;
-  --border: #e2dbd0;
+  /* Decorative card boundaries only. Interactive boundaries use --accent.
+     1.85:1 on --bg, deliberately below the 3:1 of WCAG 1.4.11, which governs
+     user-interface components rather than containers. */
+  --border: #c4b79f;
   --text: #1f1a18;
   --text-muted: #5c534c;
-  --text-faint: #8a8078;
-  --accent: #0092a3;
-  --accent-strong: #00707e;
+  --text-faint: #77604a;
+  --accent: #007785;
+  --accent-strong: #006b78;
   --accent-contrast: #ffffff;
-  --gold: #a97f2f;
+  --gold: #8a6a24;
   --danger: #c0392b;
   --shadow: 0 2px 12px rgb(31 26 24 / .10);
   --scrim: rgb(31 26 24 / .35);
@@ -196,7 +206,18 @@ body {
 }
 
 h1, h2, h3 { line-height: 1.25; font-weight: 600; }
-button, input, select { font: inherit; color: inherit; }
+/* line-height is set explicitly because the `font` shorthand resets it to
+   normal, which breaks baseline alignment inside fixed-height buttons.
+   appearance: none removes the platform's tinted rounded field styling so the
+   app's own radii apply. textarea is included so no field falls back to the
+   browser's ~11px default. */
+button, input, select, textarea {
+  font: inherit;
+  line-height: 1.4;
+  color: inherit;
+  appearance: none;
+}
+input[type='search']::-webkit-search-cancel-button { appearance: auto; }
 button { background: none; border: 0; cursor: pointer; }
 button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   outline: 2px solid var(--accent);
@@ -206,6 +227,8 @@ img, svg { display: block; max-width: 100%; }
 ul, ol { list-style: none; padding: 0; }
 [hidden] { display: none !important; }
 
+/* Firefox needs the standard properties; the ::-webkit rules are ignored there. */
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--r-full); }
 
@@ -216,39 +239,40 @@ ul, ol { list-style: none; padding: 0; }
 
 - [ ] **Step 5: Create the app icon and generate PNGs**
 
-`public/icons/icon.svg`:
+Geometry only, no text. A `<text>` glyph rasterizes differently on every host,
+because librsvg resolves `font-family` through whatever fontconfig happens to
+have installed — the committed PNGs would be correct by accident of the machine
+that generated them, and turn into tofu boxes on a bare CI container.
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" fill="#241f1f"/>
-  <g fill="none" stroke="#00d4e6" stroke-width="6" opacity=".55">
-    <path d="M256 40 424 148 424 364 256 472 88 364 88 148Z"/>
-    <path d="M256 96 376 168 376 344 256 416 136 344 136 168Z"/>
-    <path d="M256 96 256 416M136 168 376 344M376 168 136 344"/>
+  <g fill="none" stroke="#00d4e6" stroke-width="7" opacity=".55">
+    <path d="M256 44 440 160 440 352 256 468 72 352 72 160Z"/>
+    <path d="M256 104 384 184 384 328 256 408 128 328 128 184Z"/>
+    <path d="M256 104 256 408M128 184 384 328M384 184 128 328"/>
   </g>
-  <text x="256" y="300" font-family="Amiri, serif" font-size="180"
-        fill="#f5f0e9" text-anchor="middle">ق</text>
+  <circle cx="256" cy="256" r="34" fill="none" stroke="#d4af6a" stroke-width="7"/>
 </svg>
 ```
 
 `scripts/generate-icons.mjs`:
 
 ```js
-import sharp from 'sharp';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import sharp from 'sharp';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = join(root, 'public', 'icons');
 await mkdir(outDir, { recursive: true });
 
-const svg = await import('node:fs/promises').then((fs) =>
-  fs.readFile(join(outDir, 'icon.svg'))
-);
+const svg = await readFile(join(outDir, 'icon.svg'));
+const square = await sharp(svg).resize(512, 512).png().toBuffer();
 
-// Maskable icons need 10% safe padding, so the glyph is scaled down.
-const plain = await sharp(svg).resize(512, 512).png().toBuffer();
+// Maskable icons are cropped to a circle of half the canvas, so the glyph is
+// scaled to 360px and re-centred, leaving ~15% padding per side.
 const maskable = await sharp(svg)
   .resize(360, 360)
   .extend({
@@ -259,10 +283,10 @@ const maskable = await sharp(svg)
   .toBuffer();
 
 await Promise.all([
-  writeFile(join(outDir, 'icon-192.png'), await sharp(plain).resize(192, 192).toBuffer()),
-  writeFile(join(outDir, 'icon-512.png'), plain),
+  writeFile(join(outDir, 'icon-192.png'), await sharp(square).resize(192, 192).toBuffer()),
+  writeFile(join(outDir, 'icon-512.png'), square),
   writeFile(join(outDir, 'maskable-512.png'), maskable),
-  writeFile(join(outDir, 'apple-touch-icon.png'), await sharp(plain).resize(180, 180).toBuffer()),
+  writeFile(join(outDir, 'apple-touch-icon.png'), await sharp(square).resize(180, 180).toBuffer()),
 ]);
 console.log('icons written to public/icons');
 ```
@@ -325,16 +349,20 @@ export default defineConfig({
         // navigateFallback to 'index.html', so merely omitting it still emits a
         // NavigationRoute ahead of runtimeCaching and shadows the pages-v1 route.
         navigateFallback: null,
-        // Navigations are served from cache explicitly below: this app has
-        // exactly one document and no router.
+        // Navigations are NetworkFirst with a 3s timeout so a fresh shell is
+        // picked up after a deploy. CacheFirst would pin the old index.html for
+        // the full maxAgeSeconds, because cleanupOutdatedCaches only removes
+        // caches whose name contains '-precache-' and so never prunes
+        // pages-v1/api-v1/assets-v1 across service-worker versions.
         runtimeCaching: [
           {
             urlPattern: ({ url, request }) =>
               request.mode === 'navigate' &&
               url.origin === self.location.origin,
-            handler: 'CacheFirst',
+            handler: 'NetworkFirst',
             options: {
               cacheName: 'pages-v1',
+              networkTimeoutSeconds: 3,
               expiration: { maxEntries: 4, maxAgeSeconds: 604800 },
               cacheableResponse: { statuses: [0, 200] },
             },
@@ -344,7 +372,15 @@ export default defineConfig({
             // the service worker, so it may NOT close over a build-time
             // constant: it would become a free variable and throw
             // ReferenceError on every request. Inline the literal.
-            urlPattern: ({ url }) => url.origin === 'https://mp3quran.net',
+            //
+            // hostname is used rather than origin.endsWith, because
+            // `https://notmp3quran.net` also ends with 'mp3quran.net'.
+            // The .mp3 exclusion makes "audio is never cached" structural
+            // rather than incidental: surah audio lives on
+            // server*.mp3quran.net, which would otherwise match this rule.
+            urlPattern: ({ url }) =>
+              (url.hostname === 'mp3quran.net' || url.hostname.endsWith('.mp3quran.net')) &&
+              !url.pathname.endsWith('.mp3'),
             handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'api-v1',
@@ -397,6 +433,17 @@ dev-dist/
 .DS_Store
 ```
 
+- [ ] **Step 8b: Create `.gitattributes`**
+
+`core.autocrlf` is on for this host, so `git add` warns `LF will be replaced by
+CRLF` on every text file. Blobs are stored as LF either way, but pinning it
+stops the warning and keeps the working tree predictable.
+
+```
+* text=auto eol=lf
+*.png binary
+```
+
 - [ ] **Step 8: Create `.github/workflows/deploy.yml`**
 
 ```yaml
@@ -430,6 +477,9 @@ jobs:
       - uses: actions/upload-pages-artifact@v5.0.0
         with:
           path: dist
+          # Defaults to false in v5, which would exclude dist/.nojekyll from the
+          # artifact and let Pages run Jekyll over the output.
+          include-hidden-files: true
 
   deploy:
     needs: build
