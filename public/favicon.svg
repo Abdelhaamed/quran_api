@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#241f1f"/>
+  <path d="M32 6 54 19v26L32 58 10 45V19Z" fill="none" stroke="#00d4e6" stroke-width="1.6" opacity=".6"/>
+  <text x="32" y="44" font-family="serif" font-size="32" fill="#f5f0e9" text-anchor="middle">ق</text>
+</svg>

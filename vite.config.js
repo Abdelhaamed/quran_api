@@ -1,8 +1,6 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-const API_ORIGIN = 'https://mp3quran.net';
-
 export default defineConfig({
   base: '/quran_api/',
   build: {
@@ -18,7 +16,10 @@ export default defineConfig({
     VitePWA({
       registerType: 'prompt',
       injectRegister: false,
-      includeAssets: ['icons/*.png', 'favicon.svg'],
+      // globPatterns already matches everything in public/, so letting the
+      // plugin inject manifest.icons as additionalManifestEntries too would
+      // precache those icons twice.
+      includeManifestIcons: false,
       manifest: {
         name: 'القرآن الكريم',
         short_name: 'القرآن',
@@ -40,22 +41,30 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2,png}'],
         cleanupOutdatedCaches: true,
-        navigateFallback: 'index.html',
+        // Both keys below must be explicit. vite-plugin-pwa defaults
+        // navigateFallback to 'index.html', so merely omitting it still emits a
+        // NavigationRoute ahead of runtimeCaching and shadows the pages-v1 route.
+        navigateFallback: null,
+        // Navigations are served from cache explicitly below: this app has
+        // exactly one document and no router.
         runtimeCaching: [
           {
             urlPattern: ({ url, request }) =>
               request.mode === 'navigate' &&
               url.origin === self.location.origin,
-            handler: 'NetworkFirst',
+            handler: 'CacheFirst',
             options: {
               cacheName: 'pages-v1',
-              networkTimeoutSeconds: 3,
-              expiration: { maxEntries: 8, maxAgeSeconds: 604800 },
+              expiration: { maxEntries: 4, maxAgeSeconds: 604800 },
               cacheableResponse: { statuses: [0, 200] },
             },
           },
           {
-            urlPattern: ({ url }) => url.origin === API_ORIGIN,
+            // The predicate below is serialized into sw.js and evaluated in
+            // the service worker, so it may NOT close over a build-time
+            // constant: it would become a free variable and throw
+            // ReferenceError on every request. Inline the literal.
+            urlPattern: ({ url }) => url.origin === 'https://mp3quran.net',
             handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'api-v1',
@@ -75,11 +84,8 @@ export default defineConfig({
             },
           },
         ],
-        // The urlPattern predicates above are serialized into sw.js and run
-        // inside the service worker, where `self` is ServiceWorkerGlobalScope
-        // and `.location.origin` is the site's own origin.
-        // No route below matches *.mp3, so audio stays NetworkOnly and
-        // range-based seeking keeps working. Do not add one.
+        // No route matches *.mp3, so audio stays NetworkOnly and range-based
+        // seeking keeps working. Do not add one.
       },
     }),
   ],
