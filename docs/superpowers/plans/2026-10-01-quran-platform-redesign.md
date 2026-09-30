@@ -377,10 +377,11 @@ export default defineConfig({
             // `https://notmp3quran.net` also ends with 'mp3quran.net'.
             // The .mp3 exclusion makes "audio is never cached" structural
             // rather than incidental: surah audio lives on
-            // server*.mp3quran.net, which would otherwise match this rule.
+            // server*.mp3quran.net, which WOULD otherwise match this rule.
+            // Lowercased so a .MP3 cannot slip past the exclusion.
             urlPattern: ({ url }) =>
               (url.hostname === 'mp3quran.net' || url.hostname.endsWith('.mp3quran.net')) &&
-              !url.pathname.endsWith('.mp3'),
+              !url.pathname.toLowerCase().endsWith('.mp3'),
             handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'api-v1',
@@ -400,8 +401,10 @@ export default defineConfig({
             },
           },
         ],
-        // No route matches *.mp3, so audio stays NetworkOnly and range-based
-        // seeking keeps working. Do not add one.
+        // Audio is never cached. mp3quran audio lives on server*.mp3quran.net,
+        // which the api-v1 predicate matches by hostname — the case-insensitive
+        // .mp3 exclusion above is what excludes it. backup.qurango.net radio
+        // streams match no route at all. Do not add a route for either.
       },
     }),
   ],
@@ -412,11 +415,18 @@ Audio URLs live on `server*.mp3quran.net` and `backup.qurango.net`, which match 
 
 - [ ] **Step 7: Create `public/favicon.svg`**
 
+Same geometry as `icons/icon.svg`, so the browser tab and the installed app
+share one mark.
+
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#241f1f"/>
-  <path d="M32 6 54 19v26L32 58 10 45V19Z" fill="none" stroke="#00d4e6" stroke-width="1.6" opacity=".6"/>
-  <text x="32" y="44" font-family="serif" font-size="32" fill="#f5f0e9" text-anchor="middle">ق</text>
+  <rect width="64" height="64" rx="12" fill="#241f1f"/>
+  <g fill="none" stroke="#00d4e6" stroke-width="2" opacity=".6">
+    <path d="M32 6 55 20 55 44 32 58 9 44 9 20Z"/>
+    <path d="M32 13 48 23 48 41 32 51 16 41 16 23Z"/>
+    <path d="M32 13 32 51M16 23 48 41M48 23 16 41"/>
+  </g>
+  <circle cx="32" cy="32" r="4.5" fill="none" stroke="#d4af6a" stroke-width="2"/>
 </svg>
 ```
 
@@ -444,7 +454,7 @@ stops the warning and keeps the working tree predictable.
 *.png binary
 ```
 
-- [ ] **Step 8: Create `.github/workflows/deploy.yml`**
+- [ ] **Step 9: Create `.github/workflows/deploy.yml`**
 
 ```yaml
 name: Deploy to GitHub Pages
@@ -495,14 +505,14 @@ jobs:
         uses: actions/deploy-pages@v5.0.1
 ```
 
-- [ ] **Step 9: Remove legacy files**
+- [ ] **Step 10: Remove legacy files**
 
 ```bash
 git rm -q normalize.css main.css main.js
 git rm -rq image
 ```
 
-- [ ] **Step 10: Verify the empty shell builds and serves**
+- [ ] **Step 11: Verify the empty shell builds and serves**
 
 Temporarily create `index.html`:
 
@@ -517,19 +527,22 @@ Temporarily create `index.html`:
 Run: `npm run build` then `npm run preview -- --port 4173`
 Expected: build prints `dist/index.html`; preview serves on 4173. Confirm `dist/index.html` contains `/quran_api/` asset paths and `dist/sw.js` plus `dist/manifest.webmanifest` exist.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add -A
 git commit -m "chore: scaffold Vite project with PWA config and design tokens
 
 Sets base to /quran_api/ so GitHub Pages serves assets from the
-subpath. Navigations and hashed assets are CacheFirst, mp3quran JSON is
-StaleWhileRevalidate, and no route matches audio URLs so media stays
-NetworkOnly. navigateFallback is pinned to null because the plugin
-defaults it to index.html, which would register a NavigationRoute ahead
-of runtimeCaching and shadow the pages route. includeManifestIcons is
-false because globPatterns already precaches the icons. Removes the
+subpath. Navigations are NetworkFirst with a 3s timeout so a fresh shell
+is picked up after a deploy; hashed assets are CacheFirst; mp3quran JSON
+is StaleWhileRevalidate with a case-insensitive .mp3 exclusion so surah
+audio is never cached and range-based seeking keeps working.
+navigateFallback is pinned to null because the plugin defaults it to
+index.html, which would register a NavigationRoute ahead of
+runtimeCaching and shadow the pages route. includeManifestIcons is false
+because globPatterns already precaches the icons. upload-pages-artifact
+v5 needs include-hidden-files or it drops dist/.nojekyll. Removes the
 15.5MB image directory and the normalize.css/main.css/main.js trio."
 ```
 
