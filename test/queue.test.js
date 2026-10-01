@@ -64,6 +64,14 @@ describe('createQueue', () => {
     q.setPlaylist(source);
     source.push(item(3));
     expect(q.size).toBe(2);
+  });
+
+  it('copies on read so a caller cannot mutate the queue through items', () => {
+    const q = createQueue();
+    q.setPlaylist([item(1), item(2)]);
+    const got = q.items;
+    got.push(item(99));
+    expect(q.size).toBe(2);
     expect(q.items).toHaveLength(2);
   });
 
@@ -71,6 +79,13 @@ describe('createQueue', () => {
     const q = createQueue();
     q.setPlaylist([item(1), item(18)]);
     expect(q.setIndexBySurah('18')).toBe(1);
+  });
+
+  it('coerces string ids coming from the playlist itself', () => {
+    const q = createQueue();
+    q.setPlaylist([{ surahId: '1', url: '/x/1.mp3' }, { surahId: '2', url: '/x/2.mp3' }]);
+    expect(q.setIndexBySurah(2)).toBe(1);
+    expect(q.current.url).toBe('/x/2.mp3');
   });
 
   it('clears back to an empty queue', () => {
