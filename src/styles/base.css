@@ -43,3 +43,10 @@ ul, ol { list-style: none; padding: 0; }
 @media (min-width: 768px) {
   body { font-size: var(--fs-lg); }
 }
+
+/* The sticky player is position: fixed, so it contributes no height here.
+   --player-space is written by the player from its own measured height, which
+   folds the safe-area inset, the hidden/shown state and the user's font size
+   into one number. The fallback is 0px, not --player-h, so a page with no
+   player at all reserves nothing rather than a guessed constant. */
+body { padding-block-end: calc(var(--player-space, 0px) + var(--sp-4)); }

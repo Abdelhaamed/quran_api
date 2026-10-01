@@ -1,0 +1,61 @@
+.pl {
+  position: fixed;
+  inset-inline: 0;
+  inset-block-end: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border-block-start: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  padding: var(--sp-2) var(--sp-4) calc(var(--sp-2) + env(safe-area-inset-bottom));
+}
+.pl-inner { max-inline-size: var(--content-max); margin-inline: auto; display: grid; gap: var(--sp-2); }
+.pl-head { display: flex; align-items: center; gap: var(--sp-3); }
+.pl-names { min-inline-size: 0; flex: 1; }
+.pl-title { font-family: var(--font-quran); font-size: var(--fs-lg); font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-sub { font-size: var(--fs-xs); color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.pl-seek { display: flex; align-items: center; gap: var(--sp-3); }
+.pl-progress { flex: 1; block-size: 4px; background: var(--border); border-radius: var(--r-full); overflow: hidden; }
+.pl-bar-fill { display: block; block-size: 100%; inline-size: 0; background: var(--accent); }
+.pl-time { font-size: var(--fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* Wrap rather than shrink: the six controls need 304px of button plus 40px of
+   gap, which a 360px phone cannot supply at --sp-2. `flex: 0 0 auto` is what
+   makes that safe — without it flexbox silently squeezes every button below
+   --tap, which is a WCAG 2.5.8 failure that no layout assertion would catch. */
+.pl-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-2); }
+.pl-btn {
+  flex: 0 0 auto;
+  touch-action: manipulation;
+  inline-size: var(--tap);
+  block-size: var(--tap);
+  border-radius: var(--r-full);
+  display: grid;
+  place-items: center;
+  color: var(--text);
+  font-size: var(--fs-lg);
+}
+.pl-btn:hover { background: var(--surface-hover); }
+.pl-btn.is-on { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.pl-play { inline-size: var(--tap-lg); block-size: var(--tap-lg); background: var(--accent); color: var(--accent-contrast); }
+.pl-play:hover { background: var(--accent-strong); }
+.ic { line-height: 1; }
+
+/* After .pl-btn, so the heart keeps its larger glyph instead of inheriting
+   --fs-lg from the shared button rule. */
+.pl-heart { inline-size: var(--tap); block-size: var(--tap); border-radius: var(--r-full);
+  font-size: var(--fs-xl); color: var(--text-muted); }
+.pl-heart.is-on { color: var(--danger); }
+
+@media (max-width: 24rem) {
+  .pl { padding-inline: var(--sp-3); }
+  .pl-controls { gap: var(--sp-1); }
+}
+
+@media (min-width: 768px) {
+  .pl-controls { gap: var(--sp-3); }
+}
