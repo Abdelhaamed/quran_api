@@ -20,6 +20,26 @@ function isRetryable(err) {
   return !(err instanceof ApiError) || err.status === 0 || err.status >= 500;
 }
 
+/**
+ * The Arabic copy is the only user-facing text this layer produces, so every
+ * failure path must map to it — including HTTP statuses. Rethrowing the raw
+ * `HTTP 404` would surface English in an Arabic interface.
+ *
+ * `navigator` is absent outside browsers, so it is guarded: a ReferenceError
+ * here would replace the Arabic message with an opaque crash.
+ */
+function messageFor(err) {
+  if (!(err instanceof ApiError)) {
+    return typeof navigator !== 'undefined' && navigator.onLine === false
+      ? 'لا يوجد اتصال بالإنترنت. البيانات المحفوظة متاحة.'
+      : 'تعذّر جلب البيانات. تحقق من الاتصال وحاول مجدداً.';
+  }
+  if (err.status >= 500) return 'الخادم غير متاح الآن. حاول بعد قليل.';
+  if (err.status === 404) return 'تعذّر العثور على البيانات المطلوبة.';
+  if (err.status === 403) return 'لا صلاحية للوصول إلى هذه البيانات.';
+  return 'تعذّر جلب البيانات. تحقق من الاتصال وحاول مجدداً.';
+}
+
 export async function getJSON(path, { signal, timeoutMs = DEFAULT_TIMEOUT, retries = 1 } = {}) {
   let lastError;
 
@@ -51,12 +71,5 @@ export async function getJSON(path, { signal, timeoutMs = DEFAULT_TIMEOUT, retri
     }
   }
 
-  if (lastError instanceof ApiError) throw lastError;
-  // `navigator` is absent outside browsers, and `onLine` is undefined in some
-  // runtimes, so this must not throw: a ReferenceError here would replace the
-  // Arabic message the UI shows with an opaque crash.
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-    throw new ApiError('لا يوجد اتصال بالإنترنت. البيانات المحفوظة متاحة.', lastError);
-  }
-  throw new ApiError('تعذّر جلب البيانات. تحقق من الاتصال وحاول مجدداً.', lastError);
+  throw new ApiError(messageFor(lastError), lastError, lastError?.status ?? 0);
 }

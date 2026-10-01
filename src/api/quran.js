@@ -7,7 +7,6 @@ import { getJSON } from './client.js';
  */
 export function deriveStyle(moshafName) {
   const n = moshafName || '';
-  if (n.includes('المجود')) return 'مجوّد';
   if (n.includes('المعلم')) return 'مُعلِّم';
   if (n.includes('مرتل')) return 'مرتّل';
   if (n.includes('مجود')) return 'مجوّد';
