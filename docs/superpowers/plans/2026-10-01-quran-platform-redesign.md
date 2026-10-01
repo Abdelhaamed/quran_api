@@ -123,7 +123,9 @@ Expected: exit 0, no `ERESOLVE`. Then `npm ls vite vite-plugin-pwa vitest` shows
   --border: #6b625c;
   --text: #f5f0e9;
   --text-muted: #b5aca3;
-  --text-faint: #9a9088;
+  /* 4.94:1 on --surface, the lightest surface text ever lands on. Cards use
+     --surface, so this must clear AA there and not just on --bg. */
+  --text-faint: #a89e95;
   --accent: #00d4e6;
   --accent-strong: #6ff0ff;
   --accent-contrast: #06252a;
