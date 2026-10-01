@@ -13,6 +13,11 @@ describe('favoriteKey', () => {
   it('composes surah and moshaf ids', () => {
     expect(favoriteKey(18, 133)).toBe('18:133');
   });
+
+  it('coerces ids so a stored string matches the API number', () => {
+    expect(favoriteKey('18', '133')).toBe('18:133');
+    expect(favoriteKey(' 18 ', 133)).toBe('18:133');
+  });
 });
 
 describe('isFavorite', () => {
@@ -53,6 +58,11 @@ describe('sortForPlayback', () => {
   it('sorts by surah number', () => {
     const list = [entry(18, 1), entry(2, 1), entry(36, 1)];
     expect(sortForPlayback(list).map((f) => f.surahId)).toEqual([2, 18, 36]);
+  });
+
+  it('breaks a same-surah tie by moshaf id', () => {
+    const list = [entry(18, 133), entry(18, 1), entry(2, 9)];
+    expect(sortForPlayback(list).map((f) => f.moshafId)).toEqual([9, 1, 133]);
   });
 
   it('does not mutate the input', () => {

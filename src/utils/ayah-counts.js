@@ -1,15 +1,18 @@
 /**
- * Ayah count per surah id, index 0 unused. mp3quran's `suwar` endpoint has no
- * ayah count field, and these are immutable reference data, so a table beats a
- * second runtime dependency.
+ * Ayah count per surah id. mp3quran's `suwar` endpoint has no ayah count field,
+ * and these are immutable reference data, so a table beats a second runtime
+ * dependency.
  *
- * Written as an explicit id:value map, NOT a positional array: an earlier
- * draft used a bare array and silently omitted Al-Ma'idah, which shifted every
+ * Written as an explicit id: value map, NOT a positional array: an earlier
+ * draft used a bare array and silently omitted surah 5, which shifted every
  * surah from 5 onward. Keying by id makes that class of error impossible.
  *
+ * Built on a null prototype so an id like 'constructor' cannot resolve to an
+ * inherited Object.prototype member.
+ *
  * Verified against two independent live sources that agree exactly, and against
- * the canonical total of 6236 ayat: 114 keys, Al-Fatihah=7, Al-Ma'idah=120,
- * Al-Kahf=110, An-Nas=6.
+ * the canonical total of 6236 ayat: 114 keys, surah 1=7, surah 5=120,
+ * surah 18=110, surah 114=6.
  */
 const COUNTS = {
   1: 7, 2: 286, 3: 200, 4: 176, 5: 120, 6: 165, 7: 206, 8: 75, 9: 129, 10: 109,
@@ -26,8 +29,9 @@ const COUNTS = {
   111: 5, 112: 4, 113: 5, 114: 6,
 };
 
-export const AYAH_COUNTS = Object.freeze(COUNTS);
+export const AYAH_COUNTS = Object.freeze(Object.assign(Object.create(null), COUNTS));
 
 export function ayahCount(surahId) {
-  return AYAH_COUNTS[surahId] ?? 0;
+  const value = AYAH_COUNTS[surahId];
+  return typeof value === 'number' ? value : 0;
 }

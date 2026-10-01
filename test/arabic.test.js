@@ -22,6 +22,19 @@ describe('normalize', () => {
     expect(normalize('سؤال')).toBe('سوال');
   });
 
+  it('drops a standalone hamza', () => {
+    // A real reciter name in the live corpus carries one, inside
+    // "قراءة يعقوب الحضرمي بروايتي رويس وروح".
+    expect(normalize('قراءة')).toBe('قراه');
+  });
+
+  it('normalizes non-strings without swallowing them', () => {
+    expect(normalize(0)).toBe('0');
+    expect(normalize(18)).toBe('18');
+    expect(normalize(null)).toBe('');
+    expect(normalize(undefined)).toBe('');
+  });
+
   it('converts Arabic-Indic digits and lowercases latin', () => {
     expect(normalize('سورة ١٨')).toBe('سوره 18');
     expect(normalize('AlKahf')).toBe('alkahf');
@@ -46,16 +59,27 @@ describe('normalize', () => {
 describe('matchesAll', () => {
   // This is the function search actually calls, so it needs coverage of its
   // own: normalize() being correct does not prove matching is correct.
-  it('matches through Arabic folding', () => {
+  it('folds the query, not just the haystack', () => {
+    // Every natural query a user types is UNFOLDED. If normalize(query) were
+    // dropped, all of these would return false and search would silently break
+    // for every real input while a suite using pre-folded queries stayed green.
+    expect(matchesAll('احمد العجمي', 'أحمد')).toBe(true);
+    expect(matchesAll('محمد إبراهيم الحضرمي', 'إبراهيم')).toBe(true);
+    expect(matchesAll('أبو بكر الشاطري', 'ابو بكر')).toBe(true);
+    expect(matchesAll('فاطمة', 'فاطمة')).toBe(true);
+    expect(matchesAll('مؤمن', 'مؤمن')).toBe(true);
+  });
+
+  it('folds both sides identically', () => {
     expect(matchesAll('أحمد العجمي', 'احمد')).toBe(true);
-    expect(matchesAll('فاطمة', 'فاطمه')).toBe(true);
-    expect(matchesAll('محمود خليل الحصري', 'الحصري')).toBe(true);
+    expect(matchesAll('احمد العجمي', 'أحمد')).toBe(true);
   });
 
   it('requires every token to match', () => {
     expect(matchesAll('أحمد بن علي العجمي', 'احمد')).toBe(true);
     expect(matchesAll('أحمد بن علي العجمي', 'احمد عجمي')).toBe(true);
     expect(matchesAll('أحمد بن علي العجمي', 'احمد sudais')).toBe(false);
+    expect(matchesAll('عبد الرحمن السديس', 'السديس عبد')).toBe(true);
   });
 
   it('treats an empty query as a match', () => {
@@ -63,7 +87,7 @@ describe('matchesAll', () => {
     expect(matchesAll('الحصري', '   ')).toBe(true);
   });
 
-  it('does not match a substring of a shorter word', () => {
+  it('rejects a token absent from the haystack', () => {
     expect(matchesAll('محمد', 'احمد')).toBe(false);
   });
 });

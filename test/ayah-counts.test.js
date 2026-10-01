@@ -18,7 +18,7 @@ describe('AYAH_COUNTS', () => {
     expect(ayahCount(114)).toBe(6);
   });
 
-  it('has Al-Maidah at 120, the value an earlier draft dropped', () => {
+  it('has surah 5 at 120, the value an earlier draft dropped', () => {
     expect(ayahCount(5)).toBe(120);
   });
 
@@ -29,6 +29,17 @@ describe('AYAH_COUNTS', () => {
   it('returns 0 for an unknown surah', () => {
     expect(ayahCount(0)).toBe(0);
     expect(ayahCount(115)).toBe(0);
+  });
+
+  it('does not resolve inherited Object.prototype keys', () => {
+    expect(ayahCount('constructor')).toBe(0);
+    expect(ayahCount('toString')).toBe(0);
+    expect(ayahCount('__proto__')).toBe(0);
+    expect(ayahCount('hasOwnProperty')).toBe(0);
+  });
+
+  it('has no null-prototype to inherit from', () => {
+    expect(Object.getPrototypeOf(AYAH_COUNTS)).toBeNull();
   });
 
   it('is frozen so no module can mutate the table', () => {

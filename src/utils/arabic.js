@@ -9,7 +9,7 @@ const ARABIC_INDIC = /[\u0660-\u0669]/g;
 const WHITESPACE = /\s+/g;
 
 export function normalize(text) {
-  if (!text) return '';
+  if (text === null || text === undefined) return '';
   return String(text)
     .replace(TASHKEEL, '')
     .replace(ALEF, '\u0627')
@@ -25,7 +25,8 @@ export function normalize(text) {
 }
 
 export function matchesAll(haystack, query) {
-  const tokens = normalize(query).split(' ').filter(Boolean);
+  const normalizedQuery = normalize(query);
+  const tokens = normalizedQuery ? normalizedQuery.split(' ') : [];
   if (tokens.length === 0) return true;
   const text = normalize(haystack);
   return tokens.every((t) => text.includes(t));

@@ -57,4 +57,38 @@ describe('createQueue', () => {
     expect(q.setIndexBySurah(99)).toBe(-1);
     expect(q.index).toBe(0);
   });
+
+  it('copies the playlist instead of aliasing the caller array', () => {
+    const source = [item(1), item(2)];
+    const q = createQueue();
+    q.setPlaylist(source);
+    source.push(item(3));
+    expect(q.size).toBe(2);
+    expect(q.items).toHaveLength(2);
+  });
+
+  it('coerces a string surah id', () => {
+    const q = createQueue();
+    q.setPlaylist([item(1), item(18)]);
+    expect(q.setIndexBySurah('18')).toBe(1);
+  });
+
+  it('clears back to an empty queue', () => {
+    const q = createQueue();
+    q.setPlaylist([item(1), item(2)]);
+    q.next();
+    q.clear();
+    expect(q.size).toBe(0);
+    expect(q.index).toBe(0);
+    expect(q.current).toBeNull();
+    expect(q.next()).toBeNull();
+    expect(q.prev()).toBeNull();
+  });
+
+  it('degrades to empty when handed a non-array', () => {
+    const q = createQueue();
+    q.setPlaylist('not an array');
+    expect(q.size).toBe(0);
+    expect(q.current).toBeNull();
+  });
 });
