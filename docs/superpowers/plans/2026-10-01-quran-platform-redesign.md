@@ -1202,7 +1202,7 @@ import { getJSON } from './client.js';
  */
 export function deriveStyle(moshafName) {
   const n = moshafName || '';
-  if (n.includes('المعلم')) return 'مُعلِّم';
+  if (n.includes('معلم')) return 'مُعلِّم';
   if (n.includes('مرتل')) return 'مرتّل';
   if (n.includes('مجود')) return 'مجوّد';
   if (n.includes('مميزة')) return 'مميّزة';
@@ -1388,26 +1388,24 @@ console.log('unique moshaf id:', unique.size, unique.size === moshafCount ? 'OK 
 console.log('suwar           :', suwar.length, suwar.length === 114 ? 'OK' : 'MISMATCH');
 console.log('riwayat         :', riwayat.length, riwayat.length === 20 ? 'OK' : 'MISMATCH');
 console.log('radios          :', radios.length, radios.length === 177 ? 'OK' : 'MISMATCH');
+
 // Every radio URL must be a plain audio stream the <audio> element can take
 // directly. deriveStyle is called here rather than trusted from the precomputed
 // m.style, so the harness actually exercises the classifier.
 if (radios.some((r) => !r.url)) throw new Error('a radio entry has no url');
-const unstyled = reciters.flatMap((r) => r.moshaf)
-  .filter((m) => deriveStyle(m.name) === '');
-console.log('unstyled moshaf :', unstyled.length, '→', unstyled.map((m) => m.name).join(' | '));
-if (unstyled.length > 1) throw new Error(`${unstyled.length} unstyled moshaf; extend deriveStyle`);
 
 const styles = new Set(reciters.flatMap((r) => r.moshaf.map((m) => deriveStyle(m.name))));
 for (const required of ['مرتّل', 'مجوّد', 'مميّزة'])
   if (!styles.has(required)) throw new Error(`deriveStyle lost the ${required} branch`);
 console.log('styles seen     :', [...styles].join(' | '));
 
-// Every radio URL must be a plain audio stream the <audio> element can take
-// directly. deriveStyle is called here rather than trusted from the precomputed
-// m.style, so the harness actually exercises the classifier.
-if (radios.some((r) => !r.url)) throw new Error('a radio entry has no url');
-const unstyled = reciters.flatMap((r) => r.moshaf).filter((m) => m.style === '');
+// Checked after the required branches so a deleted branch reports the specific
+// loss rather than the generic count. Only one live moshaf has no style word
+// (a 1387 AH historical recording), where '' is correct.
+const unstyled = reciters.flatMap((r) => r.moshaf)
+  .filter((m) => deriveStyle(m.name) === '');
 console.log('unstyled moshaf :', unstyled.length, '→', unstyled.map((m) => m.name).join(' | '));
+if (unstyled.length > 1) throw new Error(`${unstyled.length} unstyled moshaf; extend deriveStyle`);
 
 const byId = new Map(suwar.map((s) => [s.id, s]));
 const maaher = reciters.find((r) => r.moshaf.some((m) => m.surahTotal === 38));
@@ -1428,7 +1426,7 @@ console.log('all playlist urls well-formed');
 ```
 
 Run: `node scripts/verify-api.mjs`
-Expected: reciters 241 OK, moshaf 287 OK, unique moshaf id OK, suwar 114 OK, riwayat 20 OK, and a non-zero styles list including مرتّل and مجوّد.
+Expected: reciters 241 OK, moshaf 287 OK, unique moshaf id OK, suwar 114 OK, riwayat 20 OK, radios 177 OK, `styles seen` containing مرتّل and مجوّد and مُعلِّم and مميّزة, `unstyled moshaf : 1`, and `all playlist urls well-formed`.
 
 - [ ] **Step 6: Write `test/client.test.js`**
 
@@ -1518,8 +1516,8 @@ describe('getJSON error messages', () => {
 `deriveStyle` is pure and is the function that would silently mislabel 215 reciters if it drifted, so it gets its own unit coverage against the real names the live API returns.
 
 ```js
-import { describe, it, expect } from 'vitest';
-import { deriveStyle, surahUrl, buildPlaylist } from '../src/api/quran.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { deriveStyle, surahUrl, buildPlaylist, getReciters } from '../src/api/quran.js';
 
 describe('deriveStyle', () => {
   it('classifies the three styles present in the live corpus', () => {
@@ -1587,9 +1585,54 @@ describe('buildPlaylist', () => {
     expect(buildPlaylist(null, suwarById)).toEqual([]);
   });
 
-  it('ignores non-numeric and out-of-range entries in surahList', () => {
-    const moshaf = { server: 'https://s/', surahList: [0, 1, -3, 18] };
-    expect(buildPlaylist(moshaf, suwarById).map((x) => x.surahId)).toEqual([1, 18]);
+  it('passes surahList through verbatim, in order', () => {
+    // buildPlaylist does NOT filter. It receives an already-parsed list from
+    // getReciters, which owns the validation. See the getReciters suite below
+    // for where the filtering is pinned.
+    const moshaf = { server: 'https://s/', surahList: [114, 1, 18] };
+    expect(buildPlaylist(moshaf, suwarById).map((x) => x.surahId)).toEqual([114, 1, 18]);
+  });
+});
+
+describe('getReciters parsing', () => {
+  // The surah_list filter lives in getReciters, so it is pinned here rather
+  // than by asserting it in buildPlaylist, which does not do it.
+  const fetchStub = (payload) => {
+    const original = globalThis.fetch;
+    beforeEach(() => { globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => payload }); });
+    afterEach(() => { globalThis.fetch = original; vi.restoreAllMocks(); });
+  };
+
+  it('drops non-numeric and out-of-range surah_list entries', async () => {
+    fetchStub({
+      reciters: [{
+        id: 1, name: 'اختبار', letter: 'ا',
+        moshaf: [{ id: 5, name: 'حفص عن عاصم - مرتل', server: 'https://s/', surah_total: '4', surah_list: '0, 1, -3, x, 18,, 114' }],
+      }],
+    });
+    const [r] = await getReciters();
+    expect(r.moshaf[0].surahList).toEqual([1, 18, 114]);
+  });
+
+  it('derives style from the moshaf name, not moshaf_type', async () => {
+    fetchStub({
+      reciters: [{
+        id: 1, name: 'اختبار', letter: 'ا',
+        moshaf: [
+          { id: 5, name: 'حفص عن عاصم - مرتل', server: 'https://s/', surah_total: '114', surah_list: '1', moshaf_type: 11 },
+          { id: 6, name: 'المصحف المجود', server: 'https://s/', surah_total: '114', surah_list: '1', moshaf_type: 222 },
+        ],
+      }],
+    });
+    const [r] = await getReciters();
+    // 11 and 222 are opaque codes, so a numeric classification would be wrong.
+    expect(r.moshaf.map((m) => m.style)).toEqual(['مرتّل', 'مجوّد']);
+  });
+
+  it('tolerates a missing moshaf array', async () => {
+    fetchStub({ reciters: [{ id: 1, name: 'اختبار', letter: 'ا' }] });
+    const [r] = await getReciters();
+    expect(r.moshaf).toEqual([]);
   });
 });
 ```
