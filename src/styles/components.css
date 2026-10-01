@@ -51,9 +51,23 @@
   font-size: var(--fs-xl); color: var(--text-muted); }
 .pl-heart.is-on { color: var(--danger); }
 
-@media (max-width: 24rem) {
+/* The breakpoint is px, not rem: the values it protects (--tap: 48px, the
+   --sp-* scale) are px, so a rem breakpoint would make a px-defined layout
+   depend on the user's font-size setting. */
+@media (max-width: 384px) {
   .pl { padding-inline: var(--sp-3); }
   .pl-controls { gap: var(--sp-1); }
+}
+
+/* Below 348px the six controls cannot fit on one line: 5x48 + 64 of button plus
+   5x4 of gap is 324px, and 324 plus 2x12 of inline padding is 348. A wrapping
+   flex row breaks greedily and orphans `next` on a line of its own, so a
+   3-column grid gives two balanced rows of three at the same 219px height.
+   The grid deliberately starts at 347 and not at 384: between 348 and 384 the
+   flex row does fit, and a 360px phone — the commonest Android width — would
+   otherwise trade its 167px player for a 219px one for nothing. */
+@media (max-width: 347px) {
+  .pl-controls { display: grid; grid-template-columns: repeat(3, auto); }
 }
 
 @media (min-width: 768px) {

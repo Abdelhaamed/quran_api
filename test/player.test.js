@@ -118,24 +118,41 @@ describe('player visibility and reserved space', () => {
 });
 
 describe('player radio mode', () => {
-  it('hides the progress bar and every skip control for radio', () => {
+  // getRadios() returns a LIST of stations, the queue navigates it, and
+  // mediaSession already registers previoustrack/nexttrack for radio. Hiding
+  // prev/next would leave a station player with only play and pause.
+  it('hides the seek row, both seek buttons and repeat for radio', () => {
     const t = setup({ playback: track({ kind: 'radio', seekable: false }) });
-    for (const sel of ['.pl-seek', '.pl-back', '.pl-fwd', '.pl-prev', '.pl-next', '.pl-repeat']) {
+    for (const sel of ['.pl-seek', '.pl-back', '.pl-fwd', '.pl-repeat']) {
       expect(t.find(sel).hidden, sel).toBe(true);
     }
-    expect(t.find('.pl-play').hidden).toBe(false);
   });
 
-  it('shows them for a seekable surah', () => {
+  it('keeps the station navigation controls available for radio', () => {
+    const t = setup({ playback: track({ kind: 'radio', seekable: false }) });
+    for (const sel of ['.pl-play', '.pl-prev', '.pl-next', '.pl-heart']) {
+      expect(t.find(sel).hidden, sel).toBe(false);
+    }
+  });
+
+  it('routes prev and next to the queue in radio mode', () => {
+    const t = setup({ playback: track({ kind: 'radio', seekable: false }) });
+    t.find('.pl-next').click();
+    t.find('.pl-prev').click();
+    expect(t.calls.onNext).toHaveBeenCalledOnce();
+    expect(t.calls.onPrev).toHaveBeenCalledOnce();
+  });
+
+  it('shows every control for a seekable surah', () => {
     const t = setup({ playback: track() });
     for (const sel of ['.pl-seek', '.pl-back', '.pl-fwd', '.pl-prev', '.pl-next', '.pl-repeat']) {
       expect(t.find(sel).hidden, sel).toBe(false);
     }
   });
 
-  // A control must never be visible for an item the engine's own guard will
+  // A seek control must never be visible for an item the engine's own guard will
   // refuse to seek, whichever way the item was flagged.
-  it('hides them for any unseekable item, not only for kind=radio', () => {
+  it('hides the seek controls for any unseekable item, not only for kind=radio', () => {
     const t = setup({ playback: track({ kind: 'surah', seekable: false }) });
     expect(t.find('.pl-seek').hidden).toBe(true);
     expect(t.find('.pl-fwd').hidden).toBe(true);
@@ -254,15 +271,60 @@ describe('player controls', () => {
     }).not.toThrow();
   });
 
-  it('gives every control an accessible name', () => {
+  // Exact values, per control. A truthy check cannot tell a swapped pair apart:
+  // the heart and repeat buttons carried each other's wording for one whole
+  // commit and every test still passed.
+  it('names every control with its own exact label', () => {
+    const t = setup({ playback: track() });
+    const labels = {};
+    for (const b of t.root.querySelectorAll('button')) {
+      labels[b.className.split(' ').pop()] = b.getAttribute('aria-label');
+    }
+    expect(labels).toEqual({
+      'pl-heart': 'إضافة إلى المفضلة',
+      'pl-play': 'تشغيل',
+      'pl-prev': 'السورة السابقة',
+      'pl-next': 'السورة التالية',
+      'pl-back': 'تأخير 10 ثوانٍ',
+      'pl-fwd': 'تقديم 10 ثوانٍ',
+      'pl-repeat': 'تكرار السورة',
+    });
+  });
+
+  // Glyph identity per control. The four arrows are mirrored for dir=rtl, and
+  // the code points' names are the opposite of their orientations, so the exact
+  // code point is the only assertion that can catch a revert.
+  it('puts the mirrored arrow glyph on each arrow control', () => {
+    const t = setup({ playback: track() });
+    const glyph = (sel) => t.find(sel).textContent;
+    expect(glyph('.pl-prev')).toBe('\u23EE');
+    expect(glyph('.pl-next')).toBe('\u23ED');
+    expect(glyph('.pl-back')).toBe('\u23EA');
+    expect(glyph('.pl-fwd')).toBe('\u23E9');
+    expect(glyph('.pl-play')).toBe('\u25B6');
+    expect(glyph('.pl-repeat')).toBe('\u1F501');
+    expect(glyph('.pl-heart')).toBe('\u2661');
+  });
+
+  it('swaps the play glyph and the heart glyph on state, keeping identity exact', async () => {
+    const t = setup({ playback: track({ isFavorite: true }) });
+    expect(t.find('.pl-heart').textContent).toBe('\u2665');
+    expect(t.find('.pl-play').textContent).toBe('\u25B6');
+
+    t.store.setState({ playback: track({ isPlaying: true, isFavorite: false }) });
+    await flush();
+    expect(t.find('.pl-play').textContent).toBe('\u23F8');
+    expect(t.find('.pl-play').getAttribute('aria-label')).toBe('إيقاف');
+    expect(t.find('.pl-heart').textContent).toBe('\u2661');
+  });
+
+  it('keeps every glyph hidden from assistive tech', () => {
     const t = setup({ playback: track() });
     const buttons = [...t.root.querySelectorAll('button')];
     expect(buttons).toHaveLength(7);
     for (const b of buttons) {
-      expect(b.getAttribute('aria-label'), b.className).toBeTruthy();
       expect(b.textContent.trim().length, b.className).toBeGreaterThan(0);
-      // The glyph must be hidden from the reader or it is announced as junk.
-      expect(b.querySelector('.ic').getAttribute('aria-hidden')).toBe('true');
+      expect(b.querySelector('.ic').getAttribute('aria-hidden'), b.className).toBe('true');
     }
   });
 });
@@ -293,12 +355,33 @@ describe('player progress', () => {
     expect(t.find('.pl-bar-fill').style.inlineSize).toBe('100%');
   });
 
-  it('keeps the position readable to assistive tech', () => {
+  it('publishes no range at all until a duration is known', () => {
     const t = setup({ playback: track() });
     const bar = t.find('.pl-progress');
     expect(bar.getAttribute('role')).toBe('progressbar');
-    expect(bar.getAttribute('aria-valuemin')).toBe('0');
     expect(bar.getAttribute('aria-label')).toBeTruthy();
+    // A progressbar seeded with max=0 is degenerate, and it is the state every
+    // fresh player and every live stream sits in.
+    expect(bar.hasAttribute('aria-valuemin')).toBe(false);
+    expect(bar.hasAttribute('aria-valuemax')).toBe(false);
+    expect(bar.hasAttribute('aria-valuenow')).toBe(false);
+  });
+
+  it('drops the range again when the duration becomes unknown', () => {
+    const t = setup({ playback: track() });
+    t.engine.emit('time', { currentTime: 30, duration: 120 });
+    const bar = t.find('.pl-progress');
+    expect(bar.getAttribute('aria-valuemax')).toBe('120');
+
+    // A new track: the previous track's range must not be left standing.
+    t.engine.emit('track', {});
+    t.engine.element.duration = 0;
+    t.store.setState({ playback: track({ title: 'البقرة' }) });
+    return flush().then(() => {
+      expect(bar.hasAttribute('aria-valuemax')).toBe(false);
+      expect(bar.hasAttribute('aria-valuenow')).toBe(false);
+      expect(bar.hasAttribute('aria-valuemin')).toBe(false);
+    });
   });
 });
 
@@ -362,18 +445,47 @@ describe('player progress ticker', () => {
 });
 
 describe('player teardown', () => {
+  // All six registrations, not a sample. Checking only `time` and `play` let
+  // `ended`, `pause` and `blocked` stay subscribed for a whole commit while the
+  // test's name claimed otherwise: a leaked handler writes to a detached node
+  // on every engine event, forever.
   it('detaches the root, the store listener and every engine listener', async () => {
     const t = setup({ playback: track() });
     const spy = vi.spyOn(t.find('.pl-play'), 'setAttribute');
 
+    const EVENTS = ['time', 'track', 'ended', 'pause', 'blocked', 'play'];
+    for (const ev of EVENTS) {
+      expect(t.engine.listeners(ev), ev).toBe(1);
+    }
+
     t.player.destroy();
+
     expect(t.root.isConnected).toBe(false);
-    expect(t.engine.listeners('time')).toBe(0);
-    expect(t.engine.listeners('play')).toBe(0);
+    for (const ev of EVENTS) {
+      expect(t.engine.listeners(ev), ev).toBe(0);
+    }
 
     t.store.setState({ playback: track({ title: 'البقرة' }) });
     await flush();
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  // A leaked `play` handler would restart the interval after teardown, which is
+  // the one leak that costs battery rather than a wasted write.
+  it('leaves nothing that can restart the ticker', async () => {
+    vi.useFakeTimers();
+    try {
+      const t = setup({ playback: track({ isPlaying: true }) });
+      t.engine.emit('play', {});
+      expect(vi.getTimerCount()).toBe(1);
+      t.player.destroy();
+      expect(vi.getTimerCount()).toBe(0);
+
+      t.engine.emit('play', {});
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -410,13 +522,47 @@ describe('player with the real engine', () => {
 });
 
 describe('h', () => {
-  it('sets class, dataset, boolean attributes and skips false or null', () => {
+  it('sets class and boolean attributes and skips false or null', () => {
     const el = h('input', { class: 'a b', type: 'text', required: true, disabled: false, value: null });
     expect(el.getAttribute('class')).toBe('a b');
     expect(el.type).toBe('text');
     expect(el.hasAttribute('required')).toBe(true);
     expect(el.hasAttribute('disabled')).toBe(false);
     expect(el.hasAttribute('value')).toBe(false);
+  });
+
+  // The `dataset` branch was removed from dom.js and every test still passed
+  // while this test's name claimed coverage, so it is asserted directly.
+  it('assigns a dataset object onto the element dataset', () => {
+    const el = h('div', { dataset: { surahId: 18, reciter: 'akdr' } });
+    expect(el.dataset.surahId).toBe('18');
+    expect(el.dataset.reciter).toBe('akdr');
+    expect(el.getAttribute('data-surah-id')).toBe('18');
+    // dataset must not leak through as a literal attribute.
+    expect(el.hasAttribute('dataset')).toBe(false);
+  });
+
+  it('merges dataset with other attributes', () => {
+    const el = h('li', { class: 'x', dataset: { k: 'v' } });
+    expect(el.getAttribute('class')).toBe('x');
+    expect(el.getAttribute('data-k')).toBe('v');
+  });
+
+  // Same story for the `html` branch: nothing in the player uses it, so nothing
+  // else in the suite reaches it either. Asserted through the parsed result,
+  // since happy-dom decodes entities when it serialises innerHTML back.
+  it('sets innerHTML from the html attribute', () => {
+    const el = h('div', { html: '<span class="ic">&#10073;</span>' });
+    expect(el.childElementCount).toBe(1);
+    expect(el.firstElementChild.tagName).toBe('SPAN');
+    expect(el.firstElementChild.className).toBe('ic');
+    expect(el.textContent).toBe('❙');
+  });
+
+  it('applies html in attribute order and leaves textContent for children', () => {
+    const el = h('div', { html: '<b>markup</b>' }, 'child');
+    expect(el.querySelector('b').textContent).toBe('markup');
+    expect(el.textContent).toBe('markupchild');
   });
 
   it('binds on* attributes as listeners and flattens one level of children', () => {

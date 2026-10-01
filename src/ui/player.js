@@ -8,11 +8,18 @@ import { h } from '../utils/dom.js';
 const TICK_MS = 250;
 
 // Unicode rather than the brief's HTML entities, so the glyph is set as text and
-// inherits colour like any other text. `prev` and `next` are swapped relative to
-// the brief: the document is dir=rtl, so "previous" sits to the RIGHT of play
-// and must be the right-pointing glyph.
+// inherits colour like any other text.
+//
+// The document is dir=rtl, so "previous" sits to the RIGHT of play and "back in
+// time" points rightwards, towards the past. All four arrows are therefore
+// mirrored from the LTR values in the brief. The orientations below are measured
+// from the rasterised ink centroid, not from the code point names:
+//   U+23E9 leans left, U+23EA right, U+23ED left, U+23EE right.
+// So prev is U+23EE (right-pointing track bar), next U+23ED, back U+23EA (the
+// conventional rewind triangle) and fwd U+23E9. Reversing back/fwd to "match" an
+// LTR expectation would put a fast-forward triangle on the back button.
 const GLYPH = {
-  play: '\u25B6', pause: '\u23F8', prev: '\u23ED', next: '\u23EE',
+  play: '\u25B6', pause: '\u23F8', prev: '\u23EE', next: '\u23ED',
   back: '\u23EA', fwd: '\u23E9', repeat: '\u1F501', heart: '\u2661', heartOn: '\u2665',
 };
 
@@ -54,13 +61,13 @@ export function createPlayer({
     repeat: h('button', { class: 'pl-btn pl-repeat', type: 'button', 'aria-label': 'تكرار السورة', 'aria-pressed': 'false' }, icon('repeat')),
   };
 
+  // No aria-valuemin/max/valuenow until a duration is known: seeding them with
+  // "0" leaves a progressbar whose maximum is zero, and a track switch would
+  // leave the previous track's values standing.
   const progress = h('div', {
     class: 'pl-progress',
     role: 'progressbar',
     'aria-label': 'موضع التشغيل',
-    'aria-valuemin': '0',
-    'aria-valuenow': '0',
-    'aria-valuemax': '0',
   }, els.bar);
 
   const seekRow = h('div', { class: 'pl-seek' }, progress, els.time);
@@ -101,8 +108,13 @@ export function createPlayer({
     els.time.textContent = `${formatTime(now)} / ${formatTime(total)}`;
     els.bar.style.inlineSize = `${total > 0 ? Math.min(now / total, 1) * 100 : 0}%`;
     if (total > 0) {
+      progress.setAttribute('aria-valuemin', '0');
       progress.setAttribute('aria-valuenow', String(Math.round(now)));
       progress.setAttribute('aria-valuemax', String(Math.round(total)));
+    } else {
+      progress.removeAttribute('aria-valuemin');
+      progress.removeAttribute('aria-valuenow');
+      progress.removeAttribute('aria-valuemax');
     }
   };
 
@@ -117,6 +129,10 @@ export function createPlayer({
   // the stylesheet is either too small, covering the last card, or too large,
   // leaving dead space. A hidden element measures zero, so the inset has to be
   // reserved explicitly here — the observer reports a 0x0 box for it.
+  //
+  // Task 6: anything else anchored above this bar (a toast) must offset by
+  // --player-space too. The --player-h token in tokens.css is a stale 88px and
+  // is no longer the player's height.
   const reserve = (value) => root.ownerDocument.documentElement.style.setProperty('--player-space', value);
 
   const measure = () => {
@@ -171,17 +187,22 @@ export function createPlayer({
     els.title.textContent = p.title || '';
     els.sub.textContent = p.reciterName || '';
 
-    // A radio stream answers `Accept-Ranges: none`, so the bar and every skip
-    // control are hidden rather than shown as dead buttons. `seekable: false` is
-    // checked too, because that is the capability the engine's own guard reads:
-    // a control must never be visible for an item the engine will refuse to seek.
-    const unseekable = p.kind === 'radio' || p.seekable === false;
-    seekRow.hidden = unseekable;
-    els.back.hidden = unseekable;
-    els.fwd.hidden = unseekable;
-    els.prev.hidden = unseekable;
-    els.next.hidden = unseekable;
-    els.repeat.hidden = unseekable;
+    // A radio stream answers `Accept-Ranges: none`, so the bar and the two
+    // seek buttons are hidden rather than shown as dead controls. prev/next
+    // stay: getRadios() returns a LIST of stations, the queue navigates it, and
+    // mediaSession registers previoustrack/nexttrack for radio today, so hiding
+    // them in-app would leave a station player with only play and pause.
+    // seekable: false is honoured as well as kind, because that is the
+    // capability the engine's own guard reads.
+    const radio = p.kind === 'radio' || p.seekable === false;
+    seekRow.hidden = radio;
+    els.back.hidden = radio;
+    els.fwd.hidden = radio;
+    els.prev.hidden = false;
+    els.next.hidden = false;
+    // repeat is left hidden: `repeat: one` on a live stream has no meaning, and
+    // Task 6 owns repeat semantics.
+    els.repeat.hidden = radio;
 
     const playing = Boolean(p.isPlaying);
     setGlyph(els.play, playing ? 'pause' : 'play');
