@@ -1597,11 +1597,23 @@ describe('buildPlaylist', () => {
 describe('getReciters parsing', () => {
   // The surah_list filter lives in getReciters, so it is pinned here rather
   // than by asserting it in buildPlaylist, which does not do it.
-  const fetchStub = (payload) => {
-    const original = globalThis.fetch;
-    beforeEach(() => { globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => payload }); });
-    afterEach(() => { globalThis.fetch = original; vi.restoreAllMocks(); });
-  };
+  //
+  // The hooks live in the describe body, never inside a helper called from an
+  // `it`: Vitest silently ignores a beforeEach registered once a test body is
+  // already running, which left these tests reading the live API and passing
+  // for the wrong reason.
+  const original = globalThis.fetch;
+  let payload = null;
+
+  beforeEach(() => {
+    payload = null;
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true, status: 200, json: async () => payload,
+    });
+  });
+  afterEach(() => { globalThis.fetch = original; vi.restoreAllMocks(); });
+
+  const fetchStub = (p) => { payload = p; };
 
   it('drops non-numeric and out-of-range surah_list entries', async () => {
     fetchStub({
