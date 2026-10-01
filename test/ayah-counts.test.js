@@ -18,6 +18,10 @@ describe('AYAH_COUNTS', () => {
     expect(ayahCount(114)).toBe(6);
   });
 
+  it('has Al-Maidah at 120, the value an earlier draft dropped', () => {
+    expect(ayahCount(5)).toBe(120);
+  });
+
   it('never returns zero for a real surah', () => {
     for (let id = 1; id <= 114; id += 1) expect(ayahCount(id)).toBeGreaterThan(0);
   });

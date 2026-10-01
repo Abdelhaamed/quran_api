@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalize } from '../src/utils/arabic.js';
+import { normalize, matchesAll } from '../src/utils/arabic.js';
 
 describe('normalize', () => {
   it('folds alef variants onto bare alef', () => {
@@ -40,5 +40,30 @@ describe('normalize', () => {
   it('handles empty input', () => {
     expect(normalize('')).toBe('');
     expect(normalize('   ')).toBe('');
+  });
+});
+
+describe('matchesAll', () => {
+  // This is the function search actually calls, so it needs coverage of its
+  // own: normalize() being correct does not prove matching is correct.
+  it('matches through Arabic folding', () => {
+    expect(matchesAll('أحمد العجمي', 'احمد')).toBe(true);
+    expect(matchesAll('فاطمة', 'فاطمه')).toBe(true);
+    expect(matchesAll('محمود خليل الحصري', 'الحصري')).toBe(true);
+  });
+
+  it('requires every token to match', () => {
+    expect(matchesAll('أحمد بن علي العجمي', 'احمد')).toBe(true);
+    expect(matchesAll('أحمد بن علي العجمي', 'احمد عجمي')).toBe(true);
+    expect(matchesAll('أحمد بن علي العجمي', 'احمد sudais')).toBe(false);
+  });
+
+  it('treats an empty query as a match', () => {
+    expect(matchesAll('الحصري', '')).toBe(true);
+    expect(matchesAll('الحصري', '   ')).toBe(true);
+  });
+
+  it('does not match a substring of a shorter word', () => {
+    expect(matchesAll('محمد', 'احمد')).toBe(false);
   });
 });
