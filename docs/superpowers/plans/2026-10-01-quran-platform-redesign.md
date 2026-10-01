@@ -2136,13 +2136,16 @@ export function createEngine() {
 
     pause() { el.pause(); },
 
-    toggle() {
-      if (el.paused) {
-        if (current) this.play(current);
-      } else {
-        el.pause();
-      }
-    },
+function toggle() {
+    // Declared as a standalone function calling `play` directly, never as an
+    // inline `this.play(...)`: callers hold the engine as a destructured
+    // binding (`const { toggle } = engine`), where `this` is undefined.
+    if (el.paused) {
+      if (current) play(current);
+    } else {
+      el.pause();
+    }
+  }
 
     seekBy(delta) {
       if (!current || current.seekable === false) return;
@@ -2374,6 +2377,8 @@ engine.on('time', ({ currentTime, duration }) =>
 ```
 
 Add a temporary `<button id="probe">` that calls `engine.play({ url: 'https://server6.mp3quran.net/akdr/001.mp3', title: 'الفاتحة', kind: 'surah', seekable: true })`.
+
+**`index.html` must carry `<script type="module" src="/src/main.js"></script>` or nothing in `src/` reaches a device.** Task 1's placeholder document has no script tag, so without this the audio core is absent from `dist/` entirely and the probe appears to do nothing. Verify with `Select-String dist/index.html -Pattern 'main'` or by confirming `dist/assets/*.js` exists.
 
 Run: `npm run dev`, open the URL, click the button.
 Expected: audio plays. Lock the phone. Confirm audio continues and lock-screen controls appear with "الفاتحة".
