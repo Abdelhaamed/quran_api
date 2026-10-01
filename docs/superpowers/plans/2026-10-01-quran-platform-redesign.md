@@ -1126,6 +1126,31 @@ export class ApiError extends Error {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** A 4xx is deterministic, so replaying it only spends 400ms to reach the same answer. */
+function isRetryable(err) {
+  return !(err instanceof ApiError) || err.status === 0 || err.status >= 500;
+}
+
+/**
+ * The Arabic copy is the only user-facing text this layer produces, so every
+ * failure path must map to it — including HTTP statuses. Rethrowing the raw
+ * `HTTP 404` would surface English in an Arabic interface.
+ *
+ * `navigator` is absent outside browsers, so it is guarded: a ReferenceError
+ * here would replace the Arabic message with an opaque crash.
+ */
+function messageFor(err) {
+  if (!(err instanceof ApiError)) {
+    return typeof navigator !== 'undefined' && navigator.onLine === false
+      ? 'لا يوجد اتصال بالإنترنت. البيانات المحفوظة متاحة.'
+      : 'تعذّر جلب البيانات. تحقق من الاتصال وحاول مجدداً.';
+  }
+  if (err.status >= 500) return 'الخادم غير متاح الآن. حاول بعد قليل.';
+  if (err.status === 404) return 'تعذّر العثور على البيانات المطلوبة.';
+  if (err.status === 403) return 'لا صلاحية للوصول إلى هذه البيانات.';
+  return 'تعذّر جلب البيانات. تحقق من الاتصال وحاول مجدداً.';
+}
+
 export async function getJSON(path, { signal, timeoutMs = DEFAULT_TIMEOUT, retries = 1 } = {}) {
   let lastError;
 
@@ -1142,11 +1167,14 @@ export async function getJSON(path, { signal, timeoutMs = DEFAULT_TIMEOUT, retri
         signal: controller.signal,
         headers: { Accept: 'application/json' },
       });
-      if (!res.ok) throw new ApiError(`HTTP ${res.status}`);
+      if (!res.ok) throw new ApiError(`HTTP ${res.status}`, undefined, res.status);
       return await res.json();
     } catch (err) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       lastError = err;
+      // break, not a skipped sleep: the loop condition alone would still spend
+      // another round trip reaching the same answer.
+      if (!isRetryable(err)) break;
       if (attempt < retries) await sleep(400);
     } finally {
       clearTimeout(timer);
@@ -1154,11 +1182,7 @@ export async function getJSON(path, { signal, timeoutMs = DEFAULT_TIMEOUT, retri
     }
   }
 
-  if (lastError instanceof ApiError) throw lastError;
-  if (!navigator.onLine) {
-    throw new ApiError('لا يوجد اتصال بالإنترنت. البيانات المحفوظة متاحة.', lastError);
-  }
-  throw new ApiError('تعذّر جلب البيانات. تحقق من الاتصال وحاول مجدداً.', lastError);
+  throw new ApiError(messageFor(lastError), lastError, lastError?.status ?? 0);
 }
 ```
 
@@ -1173,7 +1197,6 @@ import { getJSON } from './client.js';
  */
 export function deriveStyle(moshafName) {
   const n = moshafName || '';
-  if (n.includes('المجود')) return 'مجوّد';
   if (n.includes('المعلم')) return 'مُعلِّم';
   if (n.includes('مرتل')) return 'مرتّل';
   if (n.includes('مجود')) return 'مجوّد';
@@ -1350,13 +1373,34 @@ console.log('moshaf          :', moshafCount, moshafCount === 287 ? 'OK' : 'MISM
 console.log('unique moshaf id:', unique.size, unique.size === moshafCount ? 'OK (globally unique)' : 'COLLISION');
 console.log('suwar           :', suwar.length, suwar.length === 114 ? 'OK' : 'MISMATCH');
 console.log('riwayat         :', riwayat.length, riwayat.length === 20 ? 'OK' : 'MISMATCH');
-console.log('radios          :', radios.length);
-console.log('styles seen     :', [...new Set(reciters.flatMap((r) => r.moshaf.map((m) => m.style)))].join(' | '));
+console.log('radios          :', radios.length, radios.length === 177 ? 'OK' : 'MISMATCH');
+const styled = new Set(reciters.flatMap((r) => r.moshaf.map((m) => m.style)));
+console.log('styles seen     :', [...styled].join(' | '));
 
-const byId = new Map(surah.map((s) => [s.id, s]));
+// Every radio URL must be a plain audio stream the <audio> element can take
+// directly, and no moshaf may be left unclassified by accident.
+if (radios.some((r) => !r.url)) throw new Error('a radio entry has no url');
+console.log('unstyled moshaf :',
+  reciters.flatMap((r) => r.moshaf).filter((m) => m.style === '').length,
+  '(names are "<reciter> - <riwaya>", which carry no style word)');
+
+const byId = new Map(suwar.map((s) => [s.id, s]));
 const maaher = reciters.find((r) => r.moshaf.some((m) => m.surahTotal === 38));
+if (!maaher) throw new Error('expected a reciter with a 38-surah moshaf');
 const partial = maaher.moshaf.find((m) => m.surahTotal === 38);
-console.log('partial playlist:', maaher.name, '->', buildPlaylist(partial, byId).length, 'surahs');
+const built = buildPlaylist(partial, byId);
+console.log('partial playlist:', maaher.name, '->', built.length, 'surahs');
+if (built.length !== 38) throw new Error(`expected 38 surahs, got ${built.length}`);
+console.log('partial url     :', built[0].title, built[0].url);
+
+// Every built playlist entry must resolve to a real surah and a zero-padded URL.
+for (const moshaf of [partial]) {
+  for (const entry of buildPlaylist(moshaf, byId)) {
+    if (!byId.has(entry.surahId)) throw new Error(`unknown surah ${entry.surahId}`);
+    if (!/\/\d{3}\.mp3$/.test(entry.url)) throw new Error(`bad url ${entry.url}`);
+  }
+}
+console.log('all playlist urls well-formed');
 ```
 
 Run: `node scripts/verify-api.mjs`
