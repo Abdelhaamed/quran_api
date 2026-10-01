@@ -10,14 +10,25 @@ const TICK_MS = 250;
 // Unicode rather than the brief's HTML entities, so the glyph is set as text and
 // inherits colour like any other text.
 //
-// The document is dir=rtl, so "previous" sits to the RIGHT of play and "back in
-// time" points rightwards, towards the past. All four arrows are therefore
-// mirrored from the LTR values in the brief. The orientations below are measured
-// from the rasterised ink centroid, not from the code point names:
-//   U+23E9 leans left, U+23EA right, U+23ED left, U+23EE right.
-// So prev is U+23EE (right-pointing track bar), next U+23ED, back U+23EA (the
-// conventional rewind triangle) and fwd U+23E9. Reversing back/fwd to "match" an
-// LTR expectation would put a fast-forward triangle on the back button.
+// TWO DIFFERENT RULES apply to the four arrows, and the inconsistency between
+// them is deliberate (R24). Do not "correct" one to match the other:
+//
+//   prev / next  MIRROR with reading direction. The row is dir=rtl, so
+//                "previous" sits to the RIGHT of play and takes the
+//                right-pointing glyph:  prev = U+23EE, next = U+23ED.
+//   back / fwd   DO NOT mirror. They encode TIME direction, not reading
+//                direction, so they keep the conventional media orientation:
+//                back = U+23EA (rewind), fwd = U+23E9 (fast-forward).
+//
+// The code point NAMES are the opposite of the orientations, which is exactly
+// what makes this read as a mistake. Measured from the rasterised ink centroid,
+// not guessed: U+23E9 leans left, U+23EA right, U+23ED left, U+23EE right.
+//
+// Every code point below is asserted exactly, by
+// "puts the mirrored arrow glyph on each arrow control" in test/player.test.js.
+// If one of these looks wrong, change the test AND this comment together,
+// never one alone: two commits have now shipped a mapping that contradicted
+// the comment sitting directly above it.
 const GLYPH = {
   play: '\u25B6', pause: '\u23F8', prev: '\u23EE', next: '\u23ED',
   back: '\u23EA', fwd: '\u23E9', repeat: '\u1F501', heart: '\u2661', heartOn: '\u2665',
@@ -187,11 +198,12 @@ export function createPlayer({
     els.title.textContent = p.title || '';
     els.sub.textContent = p.reciterName || '';
 
-    // A radio stream answers `Accept-Ranges: none`, so the bar and the two
-    // seek buttons are hidden rather than shown as dead controls. prev/next
-    // stay: getRadios() returns a LIST of stations, the queue navigates it, and
-    // mediaSession registers previoustrack/nexttrack for radio today, so hiding
-    // them in-app would leave a station player with only play and pause.
+    // A radio stream answers `Accept-Ranges: none`, so the progress bar and the
+    // two seek buttons are hidden rather than shown as dead controls. prev/next
+    // and repeat stay: getRadios() returns a LIST of stations, the queue
+    // navigates it, mediaSession registers previoustrack/nexttrack for radio
+    // today, and repeat-one applies to whatever is playing — hiding them would
+    // leave a station player with only play and pause.
     // seekable: false is honoured as well as kind, because that is the
     // capability the engine's own guard reads.
     const radio = p.kind === 'radio' || p.seekable === false;
@@ -200,9 +212,6 @@ export function createPlayer({
     els.fwd.hidden = radio;
     els.prev.hidden = false;
     els.next.hidden = false;
-    // repeat is left hidden: `repeat: one` on a live stream has no meaning, and
-    // Task 6 owns repeat semantics.
-    els.repeat.hidden = radio;
 
     const playing = Boolean(p.isPlaying);
     setGlyph(els.play, playing ? 'pause' : 'play');

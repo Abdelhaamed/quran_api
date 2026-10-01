@@ -120,27 +120,54 @@ describe('player visibility and reserved space', () => {
 describe('player radio mode', () => {
   // getRadios() returns a LIST of stations, the queue navigates it, and
   // mediaSession already registers previoustrack/nexttrack for radio. Hiding
-  // prev/next would leave a station player with only play and pause.
-  it('hides the seek row, both seek buttons and repeat for radio', () => {
-    const t = setup({ playback: track({ kind: 'radio', seekable: false }) });
-    for (const sel of ['.pl-seek', '.pl-back', '.pl-fwd', '.pl-repeat']) {
+  // prev/next would leave a station player with only play and pause. `repeat`
+  // is not a seek control either: repeat-one applies to whatever is playing,
+  // so it stays too (R24).
+  const RADIO = { kind: 'radio', seekable: false };
+
+  it('hides the seek row and both seek buttons for radio', () => {
+    const t = setup({ playback: track(RADIO) });
+    for (const sel of ['.pl-seek', '.pl-back', '.pl-fwd']) {
       expect(t.find(sel).hidden, sel).toBe(true);
     }
   });
 
-  it('keeps the station navigation controls available for radio', () => {
-    const t = setup({ playback: track({ kind: 'radio', seekable: false }) });
-    for (const sel of ['.pl-play', '.pl-prev', '.pl-next', '.pl-heart']) {
+  it('keeps every non-seek control available for radio', () => {
+    const t = setup({ playback: track(RADIO) });
+    for (const sel of ['.pl-play', '.pl-prev', '.pl-next', '.pl-repeat', '.pl-heart']) {
       expect(t.find(sel).hidden, sel).toBe(false);
     }
   });
 
   it('routes prev and next to the queue in radio mode', () => {
-    const t = setup({ playback: track({ kind: 'radio', seekable: false }) });
+    const t = setup({ playback: track(RADIO) });
     t.find('.pl-next').click();
     t.find('.pl-prev').click();
     expect(t.calls.onNext).toHaveBeenCalledOnce();
     expect(t.calls.onPrev).toHaveBeenCalledOnce();
+  });
+
+  // Repeat is a queue mode, not a seek, so it stays live in radio mode and must
+  // keep reporting its state: a visible control that never updates is worse
+  // than a hidden one.
+  it('keeps the repeat state in sync in radio mode', async () => {
+    const t = setup({ playback: track({ ...RADIO, isPlaying: true }) });
+    const repeat = t.find('.pl-repeat');
+    expect(repeat.hidden).toBe(false);
+    expect(repeat.getAttribute('aria-pressed')).toBe('false');
+    expect(repeat.classList.contains('is-on')).toBe(false);
+
+    repeat.click();
+    await flush();
+    expect(t.store.getState().repeat).toBe('one');
+    expect(repeat.getAttribute('aria-pressed')).toBe('true');
+    expect(repeat.classList.contains('is-on')).toBe(true);
+
+    repeat.click();
+    await flush();
+    expect(t.store.getState().repeat).toBe('off');
+    expect(repeat.getAttribute('aria-pressed')).toBe('false');
+    expect(repeat.classList.contains('is-on')).toBe(false);
   });
 
   it('shows every control for a seekable surah', () => {
@@ -156,7 +183,7 @@ describe('player radio mode', () => {
     const t = setup({ playback: track({ kind: 'surah', seekable: false }) });
     expect(t.find('.pl-seek').hidden).toBe(true);
     expect(t.find('.pl-fwd').hidden).toBe(true);
-    expect(t.find('.pl-repeat').hidden).toBe(true);
+    expect(t.find('.pl-back').hidden).toBe(true);
   });
 });
 
