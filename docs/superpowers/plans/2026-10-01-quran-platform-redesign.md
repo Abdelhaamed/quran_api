@@ -1103,7 +1103,7 @@ immutable integers do not justify a second runtime dependency."
 
 **Files:**
 - Create: `src/api/client.js`, `src/api/quran.js`, `src/state/store.js`, `src/state/persist.js`
-- Create: `test/client.test.js`, `test/quran.test.js`, `scripts/verify-api.mjs`
+- Create: `test/client.test.js`, `test/quran.test.js`, `test/store.test.js`, `test/persist.test.js`, `scripts/verify-api.mjs`
 
 **Interfaces:**
 - Produces: `getJSON(path, { signal, timeoutMs, retries }): Promise<any>`, `ApiError` with `.status`
@@ -1141,18 +1141,29 @@ function isRetryable(err) {
  * failure path must map to it — including HTTP statuses. Rethrowing the raw
  * `HTTP 404` would surface English in an Arabic interface.
  *
+ * A 4xx means the request REACHED the server and was rejected, so telling the
+ * user to check their internet connection would be actively misleading — that
+ * message belongs only to the paths where no response arrived at all.
+ *
  * `navigator` is absent outside browsers, so it is guarded: a ReferenceError
  * here would replace the Arabic message with an opaque crash.
+ *
+ * Exported so its per-status mapping can be asserted directly. Testing only
+ * "the message contains Arabic" cannot catch two statuses sharing copy, or an
+ * arm widened so that 4xx falls into the 5xx branch.
  */
-function messageFor(err) {
+export function messageFor(err) {
   if (!(err instanceof ApiError)) {
     return typeof navigator !== 'undefined' && navigator.onLine === false
       ? 'لا يوجد اتصال بالإنترنت. البيانات المحفوظة متاحة.'
       : 'تعذّر جلب البيانات. تحقق من الاتصال وحاول مجدداً.';
   }
-  if (err.status >= 500) return 'الخادم غير متاح الآن. حاول بعد قليل.';
   if (err.status === 404) return 'تعذّر العثور على البيانات المطلوبة.';
-  if (err.status === 403) return 'لا صلاحية للوصول إلى هذه البيانات.';
+  if (err.status === 401 || err.status === 403) return 'لا صلاحية للوصول إلى هذه البيانات.';
+  if (err.status === 429) return 'تم تجاوز عدد الطلبات المسموح. حاول بعد قليل.';
+  if (err.status === 408) return 'انتهت مهلة الطلب. حاول مجدداً.';
+  if (err.status >= 400) return 'طلب غير صالح. حدِّث الصفحة وحاول مجدداً.';
+  if (err.status >= 500) return 'الخادم غير متاح الآن. حاول بعد قليل.';
   return 'تعذّر جلب البيانات. تحقق من الاتصال وحاول مجدداً.';
 }
 
@@ -1210,7 +1221,10 @@ export function deriveStyle(moshafName) {
 }
 
 export async function getReciters(signal) {
-  const data = await getJSON('/reciters?language=ar', { signal, timeoutMs: 6000 });
+  // retries: 0 — this is the 191KB payload with a 6s per-attempt timeout, so a
+  // retry would push the worst case to ~12.4s of silence. The 24h cache means
+  // this rarely runs at all, and cached data renders first regardless.
+  const data = await getJSON('/reciters?language=ar', { signal, timeoutMs: 6000, retries: 0 });
   return (data.reciters || []).map((r) => ({
     id: r.id,
     name: r.name,
@@ -1259,8 +1273,11 @@ export function surahUrl(server, surahId) {
 
 /** Playlist is built from the moshaf's own surah_list, never the global list. */
 export function buildPlaylist(moshaf, suwarById) {
+  // `?? []` so a moshaf arriving from an older cache without surahList yields an
+  // empty playlist rather than a TypeError on `.map`. Filtering is NOT done
+  // here — getReciters owns validation of surah_list.
   if (!moshaf) return [];
-  return moshaf.surahList
+  return (moshaf.surahList ?? [])
     .map((id) => {
       const meta = suwarById.get(id);
       return {
@@ -1268,8 +1285,7 @@ export function buildPlaylist(moshaf, suwarById) {
         title: meta?.name || `سورة ${id}`,
         url: surahUrl(moshaf.server, id),
       };
-    })
-    .filter(Boolean);
+    });
 }
 ```
 
@@ -1287,7 +1303,16 @@ export function createStore(initial) {
     const keys = pendingKeys;
     pendingKeys = new Set();
     const snapshot = state;
-    for (const fn of listeners) fn(snapshot, keys);
+    // Each listener is isolated: one view throwing must not starve the views
+    // registered after it, nor let the error escape as an uncaught exception
+    // from inside the microtask.
+    for (const fn of listeners) {
+      try {
+        fn(snapshot, keys);
+      } catch (err) {
+        console.error('store listener failed', err);
+      }
+    }
   };
 
   return {
@@ -1301,8 +1326,16 @@ export function createStore(initial) {
       }
     },
     subscribe(fn, { immediate = false } = {}) {
+      if (immediate) {
+        // Notify first: if fn throws, the listener was never registered, so
+        // subscribe still returns a working unsubscribe.
+        try {
+          fn(state, new Set(Object.keys(state)));
+        } catch (err) {
+          console.error('store immediate subscribe failed', err);
+        }
+      }
       listeners.add(fn);
-      if (immediate) fn(state, new Set(Object.keys(state)));
       return () => listeners.delete(fn);
     },
   };
@@ -1339,7 +1372,10 @@ export function writeState(patch) {
 export function readCache(key) {
   try {
     const entry = JSON.parse(localStorage.getItem(KEY_CACHE) || '{}')[key];
-    if (!entry) return null;
+    // `!Number.isFinite(at)` rejects an entry written without a usable
+    // timestamp: `NaN > TTL` is false, so such an entry would never expire.
+    if (!entry || typeof entry !== 'object') return null;
+    if (!Number.isFinite(entry.at)) return null;
     if (Date.now() - entry.at > CACHE_TTL_MS) return null;
     return entry.data;
   } catch {
@@ -1364,12 +1400,14 @@ Create `scripts/verify-api.mjs`:
 
 ```js
 /**
- * Live survey of the four `moshaf_type`-shaped collections, run before the UI
- * work so field-name and classification mistakes surface here rather than in a
- * component. Not shipped and not part of the build.
+ * Live survey of the data layer, run before the UI work so field-name and
+ * classification mistakes surface here rather than in a component. Not shipped
+ * and not part of the build.
  *
- * Everything asserted below is a fact about the upstream API, not a preference.
- * If one fails, the API changed — report it rather than editing the expectation.
+ * Every count below is ENFORCED with a throw, not merely printed. A printed
+ * MISMATCH with exit 0 is worse than no check: the workflow would go green
+ * while the data layer silently changed shape. These are facts about the
+ * upstream API, not preferences — if one fails, report it, do not edit it.
  */
 import { getReciters, getSuwar, getRiwayat, getRadios, buildPlaylist, deriveStyle } from '../src/api/quran.js';
 
@@ -1382,12 +1420,21 @@ const moshafCount = reciters.reduce((n, r) => n + r.moshaf.length, 0);
 const ids = reciters.flatMap((r) => r.moshaf.map((m) => m.id));
 const unique = new Set(ids);
 
-console.log('reciters        :', reciters.length, reciters.length === 241 ? 'OK' : 'MISMATCH');
-console.log('moshaf          :', moshafCount, moshafCount === 287 ? 'OK' : 'MISMATCH');
-console.log('unique moshaf id:', unique.size, unique.size === moshafCount ? 'OK (globally unique)' : 'COLLISION');
-console.log('suwar           :', suwar.length, suwar.length === 114 ? 'OK' : 'MISMATCH');
-console.log('riwayat         :', riwayat.length, riwayat.length === 20 ? 'OK' : 'MISMATCH');
-console.log('radios          :', radios.length, radios.length === 177 ? 'OK' : 'MISMATCH');
+const expect = (label, actual, wanted) => {
+  const ok = actual === wanted;
+  console.log(`${label.padEnd(17)}:`, actual, ok ? 'OK' : `MISMATCH (expected ${wanted})`);
+  if (!ok) throw new Error(`${label}: got ${actual}, expected ${wanted}`);
+};
+
+expect('reciters', reciters.length, 241);
+expect('moshaf', moshafCount, 287);
+// The whole favorites key is `${surahId}:${moshafId}`, so this invariant is
+// load-bearing: a collision would silently merge two reciters' entries.
+expect('unique moshaf id', unique.size, moshafCount);
+expect('suwar', suwar.length, 114);
+expect('riwayat', riwayat.length, 20);
+expect('radios', radios.length, 177);
+expect('meccan suwar', suwar.filter((s) => s.isMeccan).length, 86);
 
 // Every radio URL must be a plain audio stream the <audio> element can take
 // directly. deriveStyle is called here rather than trusted from the precomputed
@@ -1405,7 +1452,11 @@ console.log('styles seen     :', [...styles].join(' | '));
 const unstyled = reciters.flatMap((r) => r.moshaf)
   .filter((m) => deriveStyle(m.name) === '');
 console.log('unstyled moshaf :', unstyled.length, '→', unstyled.map((m) => m.name).join(' | '));
-if (unstyled.length > 1) throw new Error(`${unstyled.length} unstyled moshaf; extend deriveStyle`);
+if (unstyled.length !== 1) throw new Error(`${unstyled.length} unstyled moshaf; extend deriveStyle`);
+
+// makkia must be read, not type: they are exact inverses, so reading the wrong
+// one inverts Meccan and Medinan for all 114 surahs.
+expect('medinan suwar', suwar.filter((s) => !s.isMeccan).length, 28);
 
 const byId = new Map(suwar.map((s) => [s.id, s]));
 const maaher = reciters.find((r) => r.moshaf.some((m) => m.surahTotal === 38));
@@ -1453,28 +1504,69 @@ const withStatus = (status) => ({
 
 const ARABIC = /[\u0600-\u06FF]/;
 
-describe('getJSON error messages', () => {
-  it('maps 404 to Arabic', async () => {
+// One entry per status, mapping to the EXACT copy expected. Asserting the
+// exact string is what catches two statuses sharing a message, or an arm
+// widened so 4xx falls into the 5xx branch — both of which a
+// "contains Arabic" assertion waves through.
+const EXPECTED = {
+  400: 'طلب غير صالح. حدِّث الصفحة وحاول مجدداً.',
+  401: 'لا صلاحية للوصول إلى هذه البيانات.',
+  403: 'لا صلاحية للوصول إلى هذه البيانات.',
+  404: 'تعذّر العثور على البيانات المطلوبة.',
+  408: 'انتهت مهلة الطلب. حاول مجدداً.',
+  422: 'طلب غير صالح. حدِّث الصفحة وحاول مجدداً.',
+  429: 'تم تجاوز عدد الطلبات المسموح. حاول بعد قليل.',
+  500: 'الخادم غير متاح الآن. حاول بعد قليل.',
+  503: 'الخادم غير متاح الآن. حاول بعد قليل.',
+};
+
+describe('messageFor', () => {
+  it('maps each status to its own exact copy', () => {
+    for (const [status, message] of Object.entries(EXPECTED)) {
+      expect(messageFor(new ApiError('x', undefined, Number(status)))).toBe(message);
+    }
+  });
+
+  it('never puts the connectivity message on a 4xx', () => {
+    // A 4xx means the server answered and refused; suggesting a connection
+    // check would send the user down the wrong path.
+    for (const status of [400, 401, 403, 404, 408, 422, 429]) {
+      expect(messageFor(new ApiError('x', undefined, status)))
+        .not.toContain('تحقق من الاتصال');
+    }
+  });
+
+  it('gives 404 and 403 different copy', () => {
+    expect(messageFor(new ApiError('x', undefined, 404)))
+      .not.toBe(messageFor(new ApiError('x', undefined, 403)));
+  });
+
+  it('uses the connectivity copy only when no response arrived', () => {
+    expect(messageFor(new TypeError('failed'))).toContain('تحقق من الاتصال');
+    expect(messageFor(new ApiError('x', undefined, 0))).toContain('تحقق من الاتصال');
+  });
+
+  it('returns Arabic for every reachable status', () => {
+    for (const status of Object.keys(EXPECTED)) {
+      expect(messageFor(new ApiError('x', undefined, Number(status)))).toMatch(ARABIC);
+    }
+  });
+});
+
+describe('getJSON', () => {
+  it('reports status 404', async () => {
     stubFetch(withStatus(404));
     await expect(getJSON('/nope')).rejects.toMatchObject({ status: 404 });
-    await expect(getJSON('/nope')).rejects.toThrow(ARABIC);
   });
 
-  it('maps 5xx to Arabic', async () => {
-    stubFetch(withStatus(503));
-    await expect(getJSON('/boom')).rejects.toMatchObject({ status: 503 });
-    await expect(getJSON('/boom')).rejects.toThrow(ARABIC);
-  });
-
-  it('maps 403 to Arabic', async () => {
-    stubFetch(withStatus(403));
-    await expect(getJSON('/secret')).rejects.toMatchObject({ status: 403 });
-    await expect(getJSON('/secret')).rejects.toThrow(ARABIC);
+  it('reports the exact 404 copy', async () => {
+    stubFetch(withStatus(404));
+    await expect(getJSON('/nope')).rejects.toThrow('تعذّر العثور على البيانات المطلوبة.');
   });
 
   it('never leaks the literal HTTP to the user', async () => {
-    for (const status of [400, 403, 404, 429, 500, 503]) {
-      stubFetch(withStatus(status));
+    for (const status of Object.keys(EXPECTED)) {
+      stubFetch(withStatus(Number(status)));
       await expect(getJSON(`/x/${status}`)).rejects.toSatisfy(
         (e) => ARABIC.test(e.message) && !e.message.includes('HTTP'),
       );
@@ -1508,6 +1600,12 @@ describe('getJSON error messages', () => {
     await expect(getJSON('/nope')).rejects.toBeInstanceOf(ApiError);
     await expect(getJSON('/nope')).rejects.toHaveProperty('name', 'ApiError');
   });
+
+  it('distinguishes caller cancellation from failure', async () => {
+    stubFetch(withStatus(404));
+    await expect(getJSON('/nope', { signal: AbortSignal.abort() }))
+      .rejects.toHaveProperty('name', 'AbortError');
+  });
 });
 ```
 
@@ -1520,27 +1618,28 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { deriveStyle, surahUrl, buildPlaylist, getReciters } from '../src/api/quran.js';
 
 describe('deriveStyle', () => {
-  it('classifies the three styles present in the live corpus', () => {
+  it('classifies every style present in the live corpus', () => {
     expect(deriveStyle('حفص عن عاصم - مرتل')).toBe('مرتّل');
     expect(deriveStyle('المصحف المجود')).toBe('مجوّد');
     expect(deriveStyle('المصحف المعلم')).toBe('مُعلِّم');
     expect(deriveStyle('حفص عن عاصم - تلاوة مميزة')).toBe('مميّزة');
   });
 
-  it('does not confuse المجود with مجود', () => {
-    // Both fold to مجوّد because المجود contains مجود as a substring, so the
-    // separate branch that used to exist for it was dead.
-    expect(deriveStyle('المصحف المجود')).toBe(deriveStyle('مجود'));
+  it('matches مجود without requiring the definite article', () => {
+    // Asserted against the branch's return value, not equality between two
+    // inputs: comparing 'المصحف المجود' to 'مجود' would still pass with the
+    // whole branch deleted, since both would fall through to ''.
+    expect(deriveStyle('مجود')).toBe('مجوّد');
+    expect(deriveStyle('المصحف المجود')).toBe('مجوّد');
   });
 
   it('returns empty for a riwaya name with no style word', () => {
-    expect(deriveStyle('ورش عن نافع من طريق الأزرق - مرتل')).toBe('مرتّل');
     expect(deriveStyle('حفص عن عاصم - تسجيل عام 1387 هـ - 1967م')).toBe('');
     expect(deriveStyle('')).toBe('');
     expect(deriveStyle(undefined)).toBe('');
   });
 
-  it('is case and whitespace insensitive', () => {
+  it('ignores surrounding whitespace', () => {
     expect(deriveStyle('  مرتل  ')).toBe('مرتّل');
   });
 });
@@ -1649,24 +1748,264 @@ describe('getReciters parsing', () => {
 });
 ```
 
-- [ ] **Step 8: Run everything**
+- [ ] **Step 8: Write `test/store.test.js`**
+
+Two of the task's global constraints rest on this layer: a multi-key patch must render **once**, and persistence must never throw. `localStorage` is faked per test, and `queueMicrotask` is flushed with `await Promise.resolve()`.
+
+```js
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { createStore } from '../src/state/store.js';
+
+// One microtask turn is enough for a queued flush to run.
+const tick = () => Promise.resolve();
+
+describe('createStore', () => {
+  it('notifies once for a multi-key patch, with the merged key set', async () => {
+    const store = createStore({ a: 1, b: 1, c: 1 });
+    const seen = [];
+    store.subscribe((s, keys) => seen.push([...keys]));
+
+    store.setState({ a: 2 });
+    store.setState({ b: 2 });
+    store.setState({ c: 2 });
+    expect(seen).toHaveLength(0);        // nothing synchronous
+    await tick();
+    expect(seen).toEqual([['a', 'b', 'c']]);
+  });
+
+  it('does not notify when no key actually changed', async () => {
+    const store = createStore({ a: 1 });
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setState({ a: 1 });
+    await tick();
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('merges repeated writes to the same key', async () => {
+    const store = createStore({ a: 0 });
+    const seen = [];
+    store.subscribe((s, keys) => seen.push([...keys]));
+    store.setState({ a: 1 });
+    store.setState({ a: 2 });
+    await tick();
+    expect(seen).toEqual([['a']]);
+  });
+
+  it('gives every listener the same state snapshot', async () => {
+    const store = createStore({ n: 0 });
+    let first, second;
+    store.subscribe((s) => { first = s; });
+    store.subscribe((s) => { second = s; });
+    store.setState({ n: 1 });
+    await tick();
+    expect(first).toBe(second);
+  });
+
+  it('keeps notifying later listeners when an earlier one throws', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const store = createStore({ n: 0 });
+    const bad = vi.fn(() => { throw new Error('boom'); });
+    const good = vi.fn();
+    store.subscribe(bad);
+    store.subscribe(good);
+    store.setState({ n: 1 });
+    await tick();
+    expect(good).toHaveBeenCalledOnce();
+    expect(bad).toHaveBeenCalledOnce();
+    spy.mockRestore();
+  });
+
+  it('notifies synchronously and once when immediate is set', () => {
+    const store = createStore({ a: 1, b: 2 });
+    const fn = vi.fn();
+    store.subscribe(fn, { immediate: true });
+    expect(fn).toHaveBeenCalledOnce();
+    expect(fn.mock.calls[0][0]).toEqual({ a: 1, b: 2 });
+  });
+
+  it('does not queue a spurious flush from an immediate subscribe', async () => {
+    const store = createStore({ a: 1 });
+    const fn = vi.fn();
+    store.subscribe(fn, { immediate: true });
+    await tick();
+    expect(fn).toHaveBeenCalledOnce();
+  });
+
+  it('still returns an unsubscribe when an immediate callback throws', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const store = createStore({ a: 1 });
+    const off = store.subscribe(() => { throw new Error('boom'); }, { immediate: true });
+    expect(typeof off).toBe('function');
+    off();                                 // must not throw
+    spy.mockRestore();
+  });
+
+  it('stops notifying after unsubscribe', async () => {
+    const store = createStore({ n: 0 });
+    const fn = vi.fn();
+    const off = store.subscribe(fn);
+    store.setState({ n: 1 });
+    await tick();
+    off();
+    store.setState({ n: 2 });
+    await tick();
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('survives a re-entrant setState from a listener', async () => {
+    const store = createStore({ n: 0 });
+    store.subscribe((s) => { if (s.n < 3) store.setState({ n: s.n + 1 }); });
+    store.setState({ n: 1 });
+    await tick();
+    await tick();
+    expect(store.getState().n).toBeGreaterThan(1);
+  });
+
+  it('does not mutate the initial state object', async () => {
+    const initial = { a: 1 };
+    const store = createStore(initial);
+    store.setState({ a: 2 });
+    await tick();
+    expect(initial.a).toBe(1);
+  });
+});
+```
+
+- [ ] **Step 9: Write `test/persist.test.js`**
+
+`localStorage` is faked, including the hostile cases: it throws on every access (private mode / disabled storage), it throws on write (quota), and it returns malformed JSON.
+
+```js
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readState, writeState, readCache, writeCache, CACHE_TTL_MS } from '../src/state/persist.js';
+
+const KEY = 'quran.state.v2';
+const KEY_CACHE = 'quran.cache.v2';
+
+function fakeStorage({ get, set } = {}) {
+  const map = new Map();
+  return {
+    getItem: get ?? ((k) => (map.has(k) ? map.get(k) : null)),
+    setItem: set ?? ((k, v) => map.set(k, v)),
+    _map: map,
+  };
+}
+
+let storage;
+beforeEach(() => {
+  storage = fakeStorage();
+  globalThis.localStorage = storage;
+});
+afterEach(() => { delete globalThis.localStorage; vi.restoreAllMocks(); });
+
+describe('readState / writeState', () => {
+  it('returns an empty object when nothing is stored', () => {
+    expect(readState()).toEqual({});
+  });
+
+  it('round-trips a patch across calls', () => {
+    writeState({ theme: 'dark' });
+    writeState({ volume: 0.5 });
+    expect(readState()).toEqual({ theme: 'dark', volume: 0.5 });
+  });
+
+  it('returns an empty object when the stored value is malformed', () => {
+    storage.setItem(KEY, '{not json');
+    expect(readState()).toEqual({});
+  });
+
+  it('never throws when storage is unavailable', () => {
+    globalThis.localStorage = undefined;
+    expect(() => writeState({ theme: 'dark' })).not.toThrow();
+    expect(readState()).toEqual({});
+  });
+
+  it('never throws when the write exceeds quota', () => {
+    globalThis.localStorage = fakeStorage({
+      set: () => { throw new DOMException('full', 'QuotaExceededError'); },
+    });
+    expect(() => writeState({ theme: 'dark' })).not.toThrow();
+  });
+});
+
+describe('readCache / writeCache', () => {
+  it('returns null for a missing key', () => {
+    expect(readCache('reciters')).toBeNull();
+  });
+
+  it('round-trips a value', () => {
+    writeCache('reciters', [{ id: 1 }]);
+    expect(readCache('reciters')).toEqual([{ id: 1 }]);
+  });
+
+  it('expires an entry older than the TTL', () => {
+    writeCache('reciters', [{ id: 1 }]);
+    const raw = JSON.parse(storage.getItem(KEY_CACHE));
+    raw.reciters.at = Date.now() - CACHE_TTL_MS - 1000;
+    storage.setItem(KEY_CACHE, JSON.stringify(raw));
+    expect(readCache('reciters')).toBeNull();
+  });
+
+  it('keeps an entry inside the TTL', () => {
+    writeCache('reciters', [{ id: 1 }]);
+    const raw = JSON.parse(storage.getItem(KEY_CACHE));
+    raw.reciters.at = Date.now() - 1000;
+    storage.setItem(KEY_CACHE, JSON.stringify(raw));
+    expect(readCache('reciters')).toEqual([{ id: 1 }]);
+  });
+
+  it('rejects an entry with no usable timestamp', () => {
+    // NaN > TTL is false, so without this guard the entry would never expire.
+    storage.setItem(KEY_CACHE, JSON.stringify({ reciters: { data: [1] } }));
+    expect(readCache('reciters')).toBeNull();
+    storage.setItem(KEY_CACHE, JSON.stringify({ reciters: 'not an object' }));
+    expect(readCache('reciters')).toBeNull();
+  });
+
+  it('keeps other keys when one expires', () => {
+    writeCache('reciters', [{ id: 1 }]);
+    writeCache('suwar', [{ id: 1 }]);
+    const raw = JSON.parse(storage.getItem(KEY_CACHE));
+    raw.reciters.at = Date.now() - CACHE_TTL_MS - 1000;
+    storage.setItem(KEY_CACHE, JSON.stringify(raw));
+    expect(readCache('reciters')).toBeNull();
+    expect(readCache('suwar')).toEqual([{ id: 1 }]);
+  });
+
+  it('returns null when the whole blob is malformed', () => {
+    storage.setItem(KEY_CACHE, 'not json at all');
+    expect(readCache('reciters')).toBeNull();
+  });
+
+  it('never throws when storage is unavailable', () => {
+    globalThis.localStorage = undefined;
+    expect(() => writeCache('reciters', [{ id: 1 }])).not.toThrow();
+    expect(readCache('reciters')).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 10: Run everything**
 
 Run: `npm test && node scripts/verify-api.mjs && npm run build`
 Expected: all suites pass, `verify-api.mjs` exits 0 with every count exact, and the build completes. Assert exit codes, not literal test counts.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
-git add src/api src/state test/client.test.js test/quran.test.js scripts/verify-api.mjs
+git add src/api src/state test scripts/verify-api.mjs
 git commit -m "feat: add API client, quran data layer, store, and persistence
 
-getJSON enforces a per-attempt timeout (6s for the 191KB reciter payload),
-retries only 5xx and network failures, and maps every failure path to
-Arabic copy so an HTTP status never reaches the user as an English
-string. ApiError keeps .status for programmatic callers.
+getJSON enforces a per-attempt timeout, retries only 5xx and network
+failures, and maps every failure path to Arabic copy so an HTTP status
+never reaches the user as an English string. A 4xx says the request
+reached the server and was refused, so it must not tell the user to check
+their connection. ApiError keeps .status for programmatic callers.
 
 The store batches notifications through queueMicrotask so a multi-key
-patch renders once. deriveStyle parses the moshaf name rather than
+patch renders once, and isolates each listener so one throwing view cannot
+starve the others. deriveStyle parses the moshaf name rather than
 moshaf_type, whose real values are opaque codes like 11 and 222."
 ```
 
