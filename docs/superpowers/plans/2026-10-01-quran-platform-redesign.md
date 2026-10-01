@@ -559,7 +559,7 @@ v5 needs include-hidden-files or it drops dist/.nojekyll. Removes the
 **Interfaces:**
 - Produces: `normalize(text: string): string`
 - Produces: `createQueue()` → reads are getters (`size`, `index`, `current`, `items`), actions are methods (`setPlaylist`, `setIndexBySurah`, `next`, `prev`, `clear`)
-- Produces: `favoriteKey(surahId, moshafId): string`, `isFavorite(list, surahId, moshafId): boolean`, `toggleFavorite(list, entry): array`, `sortForPlayback(list): array`
+- Produces: `favoriteKey(surahId, moshafId): string`, `isFavorite(list, surahId, moshafId): boolean`, `toggleFavorite(list, entry): array`, `sortForPlayback(list): array`. Note `removeFavorite` was dropped as unreachable: Task 6 removes a favorite via `toggleFavorite`.
 - Produces: `AYAH_COUNTS` — `Record<number, number>` keyed by surah id, index 0 unused
 
 All four modules are DOM-free and import nothing.
@@ -591,6 +591,19 @@ describe('normalize', () => {
     expect(normalize('سؤال')).toBe('سوال');
   });
 
+  it('drops a standalone hamza', () => {
+    // A real reciter name in the live corpus carries one, inside
+    // "قراءة يعقوب الحضرمي بروايتي رويس وروح".
+    expect(normalize('قراءة')).toBe('قراه');
+  });
+
+  it('normalizes non-strings without swallowing them', () => {
+    expect(normalize(0)).toBe('0');
+    expect(normalize(18)).toBe('18');
+    expect(normalize(null)).toBe('');
+    expect(normalize(undefined)).toBe('');
+  });
+
   it('converts Arabic-Indic digits and lowercases latin', () => {
     expect(normalize('سورة ١٨')).toBe('سوره 18');
     expect(normalize('AlKahf')).toBe('alkahf');
@@ -615,16 +628,27 @@ describe('normalize', () => {
 describe('matchesAll', () => {
   // This is the function search actually calls, so it needs coverage of its
   // own: normalize() being correct does not prove matching is correct.
-  it('matches through Arabic folding', () => {
+  it('folds the query, not just the haystack', () => {
+    // Every natural query a user types is UNFOLDED. If normalize(query) were
+    // dropped, all of these would return false and search would silently break
+    // for every real input while a suite using pre-folded queries stayed green.
+    expect(matchesAll('احمد العجمي', 'أحمد')).toBe(true);
+    expect(matchesAll('محمد إبراهيم الحضرمي', 'إبراهيم')).toBe(true);
+    expect(matchesAll('أبو بكر الشاطري', 'ابو بكر')).toBe(true);
+    expect(matchesAll('فاطمة', 'فاطمة')).toBe(true);
+    expect(matchesAll('مؤمن', 'مؤمن')).toBe(true);
+  });
+
+  it('folds both sides identically', () => {
     expect(matchesAll('أحمد العجمي', 'احمد')).toBe(true);
-    expect(matchesAll('فاطمة', 'فاطمه')).toBe(true);
-    expect(matchesAll('محمود خليل الحصري', 'الحصري')).toBe(true);
+    expect(matchesAll('احمد العجمي', 'أحمد')).toBe(true);
   });
 
   it('requires every token to match', () => {
     expect(matchesAll('أحمد بن علي العجمي', 'احمد')).toBe(true);
     expect(matchesAll('أحمد بن علي العجمي', 'احمد عجمي')).toBe(true);
     expect(matchesAll('أحمد بن علي العجمي', 'احمد sudais')).toBe(false);
+    expect(matchesAll('عبد الرحمن السديس', 'السديس عبد')).toBe(true);
   });
 
   it('treats an empty query as a match', () => {
@@ -632,7 +656,7 @@ describe('matchesAll', () => {
     expect(matchesAll('الحصري', '   ')).toBe(true);
   });
 
-  it('does not match a substring of a shorter word', () => {
+  it('rejects a token absent from the haystack', () => {
     expect(matchesAll('محمد', 'احمد')).toBe(false);
   });
 });
@@ -657,7 +681,7 @@ const ARABIC_INDIC = /[\u0660-\u0669]/g;
 const WHITESPACE = /\s+/g;
 
 export function normalize(text) {
-  if (!text) return '';
+  if (text === null || text === undefined) return '';
   return String(text)
     .replace(TASHKEEL, '')
     .replace(ALEF, '\u0627')
@@ -673,7 +697,8 @@ export function normalize(text) {
 }
 
 export function matchesAll(haystack, query) {
-  const tokens = normalize(query).split(' ').filter(Boolean);
+  const normalizedQuery = normalize(query);
+  const tokens = normalizedQuery ? normalizedQuery.split(' ') : [];
   if (tokens.length === 0) return true;
   const text = normalize(haystack);
   return tokens.every((t) => text.includes(t));
@@ -747,6 +772,40 @@ describe('createQueue', () => {
     expect(q.setIndexBySurah(99)).toBe(-1);
     expect(q.index).toBe(0);
   });
+
+  it('copies the playlist instead of aliasing the caller array', () => {
+    const source = [item(1), item(2)];
+    const q = createQueue();
+    q.setPlaylist(source);
+    source.push(item(3));
+    expect(q.size).toBe(2);
+    expect(q.items).toHaveLength(2);
+  });
+
+  it('coerces a string surah id', () => {
+    const q = createQueue();
+    q.setPlaylist([item(1), item(18)]);
+    expect(q.setIndexBySurah('18')).toBe(1);
+  });
+
+  it('clears back to an empty queue', () => {
+    const q = createQueue();
+    q.setPlaylist([item(1), item(2)]);
+    q.next();
+    q.clear();
+    expect(q.size).toBe(0);
+    expect(q.index).toBe(0);
+    expect(q.current).toBeNull();
+    expect(q.next()).toBeNull();
+    expect(q.prev()).toBeNull();
+  });
+
+  it('degrades to empty when handed a non-array', () => {
+    const q = createQueue();
+    q.setPlaylist('not an array');
+    expect(q.size).toBe(0);
+    expect(q.current).toBeNull();
+  });
 });
 ```
 
@@ -812,6 +871,11 @@ describe('favoriteKey', () => {
   it('composes surah and moshaf ids', () => {
     expect(favoriteKey(18, 133)).toBe('18:133');
   });
+
+  it('coerces ids so a stored string matches the API number', () => {
+    expect(favoriteKey('18', '133')).toBe('18:133');
+    expect(favoriteKey(' 18 ', 133)).toBe('18:133');
+  });
 });
 
 describe('isFavorite', () => {
@@ -854,6 +918,11 @@ describe('sortForPlayback', () => {
     expect(sortForPlayback(list).map((f) => f.surahId)).toEqual([2, 18, 36]);
   });
 
+  it('breaks a same-surah tie by moshaf id', () => {
+    const list = [entry(18, 133), entry(18, 1), entry(2, 9)];
+    expect(sortForPlayback(list).map((f) => f.moshafId)).toEqual([9, 1, 133]);
+  });
+
   it('does not mutate the input', () => {
     const list = [entry(18, 1), entry(2, 1)];
     sortForPlayback(list);
@@ -866,7 +935,9 @@ describe('sortForPlayback', () => {
 
 ```js
 export function favoriteKey(surahId, moshafId) {
-  return `${surahId}:${moshafId}`;
+  // Coerced so a key built from a string id read out of storage still matches
+  // one built from the numeric id the API returns.
+  return `${Number(surahId)}:${Number(moshafId)}`;
 }
 
 export function isFavorite(list, surahId, moshafId) {
@@ -881,13 +952,14 @@ export function toggleFavorite(list, entry) {
   return [...list, { ...entry, addedAt: Date.now() }];
 }
 
+/**
+ * Two favorites of the same surah by different reciters are a supported shape,
+ * so moshafId breaks the tie. Without it the comparator is not total and the
+ * order falls to Array#sort stability rather than to a rule.
+ */
 export function sortForPlayback(list) {
-  return [...list].sort((a, b) => Number(a.surahId) - Number(b.surahId));
-}
-
-export function removeFavorite(list, surahId, moshafId) {
-  const key = favoriteKey(surahId, moshafId);
-  return list.filter((f) => favoriteKey(f.surahId, f.moshafId) !== key);
+  return [...list].sort((a, b) =>
+    Number(a.surahId) - Number(b.surahId) || Number(a.moshafId) - Number(b.moshafId));
 }
 ```
 
@@ -899,17 +971,20 @@ cross-checked against the canonical total of 6236 ayat.
 
 ```js
 /**
- * Ayah count per surah id, index 0 unused. mp3quran's `suwar` endpoint has no
- * ayah count field, and these are immutable reference data, so a table beats a
- * second runtime dependency.
+ * Ayah count per surah id. mp3quran's `suwar` endpoint has no ayah count field,
+ * and these are immutable reference data, so a table beats a second runtime
+ * dependency.
  *
- * Written as an explicit id:value map, NOT a positional array: an earlier
- * draft used a bare array and silently omitted Al-Maidah, which shifted every
+ * Written as an explicit id: value map, NOT a positional array: an earlier
+ * draft used a bare array and silently omitted surah 5, which shifted every
  * surah from 5 onward. Keying by id makes that class of error impossible.
  *
+ * Built on a null prototype so an id like 'constructor' cannot resolve to an
+ * inherited Object.prototype member.
+ *
  * Verified against two independent live sources that agree exactly, and against
- * the canonical total of 6236 ayat: 114 keys, Al-Fatihah=7, Al-Maidah=120,
- * Al-Kahf=110, An-Nas=6.
+ * the canonical total of 6236 ayat: 114 keys, surah 1=7, surah 5=120,
+ * surah 18=110, surah 114=6.
  */
 const COUNTS = {
   1: 7, 2: 286, 3: 200, 4: 176, 5: 120, 6: 165, 7: 206, 8: 75, 9: 129, 10: 109,
@@ -926,10 +1001,11 @@ const COUNTS = {
   111: 5, 112: 4, 113: 5, 114: 6,
 };
 
-export const AYAH_COUNTS = Object.freeze(COUNTS);
+export const AYAH_COUNTS = Object.freeze(Object.assign(Object.create(null), COUNTS));
 
 export function ayahCount(surahId) {
-  return AYAH_COUNTS[surahId] ?? 0;
+  const value = AYAH_COUNTS[surahId];
+  return typeof value === 'number' ? value : 0;
 }
 ```
 
@@ -967,6 +1043,17 @@ describe('AYAH_COUNTS', () => {
   it('returns 0 for an unknown surah', () => {
     expect(ayahCount(0)).toBe(0);
     expect(ayahCount(115)).toBe(0);
+  });
+
+  it('does not resolve inherited Object.prototype keys', () => {
+    expect(ayahCount('constructor')).toBe(0);
+    expect(ayahCount('toString')).toBe(0);
+    expect(ayahCount('__proto__')).toBe(0);
+    expect(ayahCount('hasOwnProperty')).toBe(0);
+  });
+
+  it('has no null-prototype to inherit from', () => {
+    expect(Object.getPrototypeOf(AYAH_COUNTS)).toBeNull();
   });
 
   it('is frozen so no module can mutate the table', () => {
