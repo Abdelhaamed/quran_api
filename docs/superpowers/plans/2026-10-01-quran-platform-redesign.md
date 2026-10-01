@@ -558,7 +558,7 @@ v5 needs include-hidden-files or it drops dist/.nojekyll. Removes the
 
 **Interfaces:**
 - Produces: `normalize(text: string): string`
-- Produces: `createQueue()` → `{ setPlaylist, setIndexBySurah, current, next, prev, size, index }`
+- Produces: `createQueue()` → reads are getters (`size`, `index`, `current`, `items`), actions are methods (`setPlaylist`, `setIndexBySurah`, `next`, `prev`, `clear`)
 - Produces: `favoriteKey(surahId, moshafId): string`, `isFavorite(list, surahId, moshafId): boolean`, `toggleFavorite(list, entry): array`, `sortForPlayback(list): array`
 - Produces: `AYAH_COUNTS` — `Record<number, number>` keyed by surah id, index 0 unused
 
@@ -568,7 +568,7 @@ All four modules are DOM-free and import nothing.
 
 ```js
 import { describe, it, expect } from 'vitest';
-import { normalize } from '../src/utils/arabic.js';
+import { normalize, matchesAll } from '../src/utils/arabic.js';
 
 describe('normalize', () => {
   it('folds alef variants onto bare alef', () => {
@@ -609,6 +609,31 @@ describe('normalize', () => {
   it('handles empty input', () => {
     expect(normalize('')).toBe('');
     expect(normalize('   ')).toBe('');
+  });
+});
+
+describe('matchesAll', () => {
+  // This is the function search actually calls, so it needs coverage of its
+  // own: normalize() being correct does not prove matching is correct.
+  it('matches through Arabic folding', () => {
+    expect(matchesAll('أحمد العجمي', 'احمد')).toBe(true);
+    expect(matchesAll('فاطمة', 'فاطمه')).toBe(true);
+    expect(matchesAll('محمود خليل الحصري', 'الحصري')).toBe(true);
+  });
+
+  it('requires every token to match', () => {
+    expect(matchesAll('أحمد بن علي العجمي', 'احمد')).toBe(true);
+    expect(matchesAll('أحمد بن علي العجمي', 'احمد عجمي')).toBe(true);
+    expect(matchesAll('أحمد بن علي العجمي', 'احمد sudais')).toBe(false);
+  });
+
+  it('treats an empty query as a match', () => {
+    expect(matchesAll('الحصري', '')).toBe(true);
+    expect(matchesAll('الحصري', '   ')).toBe(true);
+  });
+
+  it('does not match a substring of a shorter word', () => {
+    expect(matchesAll('محمد', 'احمد')).toBe(false);
   });
 });
 ```
@@ -672,13 +697,13 @@ describe('createQueue', () => {
   it('starts empty', () => {
     const q = createQueue();
     expect(q.size).toBe(0);
-    expect(q.current()).toBeNull();
+    expect(q.current).toBeNull();
   });
 
   it('navigates forward and backward', () => {
     const q = createQueue();
     q.setPlaylist([item(1), item(2), item(3)]);
-    expect(q.current().surahId).toBe(1);
+    expect(q.current.surahId).toBe(1);
     expect(q.next().surahId).toBe(2);
     expect(q.next().surahId).toBe(3);
     expect(q.next()).toBeNull();
@@ -689,7 +714,7 @@ describe('createQueue', () => {
     const q = createQueue();
     q.setPlaylist([item(1), item(2)]);
     expect(q.prev()).toBeNull();
-    expect(q.index()).toBe(0);
+    expect(q.index).toBe(0);
   });
 
   it('honours a partial surah_list from the selected moshaf', () => {
@@ -705,22 +730,22 @@ describe('createQueue', () => {
     q.setPlaylist([item(1), item(2)]);
     q.next();
     q.setPlaylist([item(9)]);
-    expect(q.index()).toBe(0);
-    expect(q.current().surahId).toBe(9);
+    expect(q.index).toBe(0);
+    expect(q.current.surahId).toBe(9);
   });
 
   it('locates an index by surah id', () => {
     const q = createQueue();
     q.setPlaylist([item(1), item(18), item(36)]);
     expect(q.setIndexBySurah(18)).toBe(1);
-    expect(q.current().surahId).toBe(18);
+    expect(q.current.surahId).toBe(18);
   });
 
   it('returns -1 for a surah outside the playlist', () => {
     const q = createQueue();
     q.setPlaylist([item(1)]);
     expect(q.setIndexBySurah(99)).toBe(-1);
-    expect(q.index()).toBe(0);
+    expect(q.index).toBe(0);
   });
 });
 ```
@@ -737,17 +762,10 @@ export function createQueue() {
   let items = [];
   let at = 0;
 
-  const clamp = () => {
-    if (items.length === 0) { at = 0; return; }
-    if (at < 0) at = 0;
-    if (at >= items.length) at = items.length - 1;
-  };
-
   return {
     setPlaylist(list) {
       items = Array.isArray(list) ? list.slice() : [];
       at = 0;
-      clamp();
     },
     setIndexBySurah(surahId) {
       const found = items.findIndex((i) => Number(i.surahId) === Number(surahId));
@@ -755,7 +773,12 @@ export function createQueue() {
       at = found;
       return at;
     },
-    current() { return items.length ? items[at] : null; },
+    // Reads are getters and actions are methods. Mixing the two made `size` a
+    // property while `index` stayed a method, which is a call-site trap.
+    get size() { return items.length; },
+    get index() { return at; },
+    get current() { return items.length ? items[at] : null; },
+    get items() { return items.slice(); },
     next() {
       if (at >= items.length - 1) return null;
       at += 1;
@@ -766,9 +789,6 @@ export function createQueue() {
       at -= 1;
       return items[at];
     },
-    index() { return at; },
-    size() { return items.length; },
-    items() { return items.slice(); },
     clear() { items = []; at = 0; },
   };
 }
@@ -881,21 +901,32 @@ cross-checked against the canonical total of 6236 ayat.
 /**
  * Ayah count per surah id, index 0 unused. mp3quran's `suwar` endpoint has no
  * ayah count field, and these are immutable reference data, so a table beats a
- * second runtime dependency. Verified: 114 entries summing to exactly 6236.
+ * second runtime dependency.
+ *
+ * Written as an explicit id:value map, NOT a positional array: an earlier
+ * draft used a bare array and silently omitted Al-Ma'idah, which shifted every
+ * surah from 5 onward. Keying by id makes that class of error impossible.
+ *
+ * Verified against two independent live sources that agree exactly, and against
+ * the canonical total of 6236 ayat: 114 keys, Al-Fatihah=7, Al-Ma'idah=120,
+ * Al-Kahf=110, An-Nas=6.
  */
-const COUNTS = [
-  0, 7, 286, 200, 176, 165, 206, 75, 129, 109, 123, 111, 43, 52, 99, 128,
-  111, 110, 98, 135, 112, 78, 118, 64, 77, 227, 93, 88, 69, 60, 34, 30,
-  73, 54, 45, 83, 182, 88, 75, 85, 54, 53, 89, 59, 37, 35, 38, 29, 18,
-  45, 60, 49, 62, 55, 78, 96, 29, 22, 24, 13, 14, 11, 11, 18, 12,
-  12, 30, 52, 52, 44, 28, 28, 20, 56, 40, 31, 50, 40, 46, 42, 29,
-  19, 36, 25, 22, 17, 19, 26, 30, 20, 15, 21, 11, 8, 8, 19, 5,
-  8, 8, 11, 11, 8, 3, 9, 5, 4, 7, 3, 6, 3, 5, 4, 5, 6,
-];
+const COUNTS = {
+  1: 7, 2: 286, 3: 200, 4: 176, 5: 120, 6: 165, 7: 206, 8: 75, 9: 129, 10: 109,
+  11: 123, 12: 111, 13: 43, 14: 52, 15: 99, 16: 128, 17: 111, 18: 110, 19: 98, 20: 135,
+  21: 112, 22: 78, 23: 118, 24: 64, 25: 77, 26: 227, 27: 93, 28: 88, 29: 69, 30: 60,
+  31: 34, 32: 30, 33: 73, 34: 54, 35: 45, 36: 83, 37: 182, 38: 88, 39: 75, 40: 85,
+  41: 54, 42: 53, 43: 89, 44: 59, 45: 37, 46: 35, 47: 38, 48: 29, 49: 18, 50: 45,
+  51: 60, 52: 49, 53: 62, 54: 55, 55: 78, 56: 96, 57: 29, 58: 22, 59: 24, 60: 13,
+  61: 14, 62: 11, 63: 11, 64: 18, 65: 12, 66: 12, 67: 30, 68: 52, 69: 52, 70: 44,
+  71: 28, 72: 28, 73: 20, 74: 56, 75: 40, 76: 31, 77: 50, 78: 40, 79: 46, 80: 42,
+  81: 29, 82: 19, 83: 36, 84: 25, 85: 22, 86: 17, 87: 19, 88: 26, 89: 30, 90: 20,
+  91: 15, 92: 21, 93: 11, 94: 8, 95: 8, 96: 19, 97: 5, 98: 8, 99: 8, 100: 11,
+  101: 11, 102: 8, 103: 3, 104: 9, 105: 5, 106: 4, 107: 7, 108: 3, 109: 6, 110: 3,
+  111: 5, 112: 4, 113: 5, 114: 6,
+};
 
-export const AYAH_COUNTS = Object.freeze(
-  Object.fromEntries(COUNTS.map((n, id) => [id, n]).filter(([id]) => id > 0)),
-);
+export const AYAH_COUNTS = Object.freeze(COUNTS);
 
 export function ayahCount(surahId) {
   return AYAH_COUNTS[surahId] ?? 0;
@@ -923,6 +954,10 @@ describe('AYAH_COUNTS', () => {
     expect(ayahCount(2)).toBe(286);
     expect(ayahCount(18)).toBe(110);
     expect(ayahCount(114)).toBe(6);
+  });
+
+  it('has Al-Ma'idah at 120, the value an earlier draft dropped', () => {
+    expect(ayahCount(5)).toBe(120);
   });
 
   it('never returns zero for a real surah', () => {
@@ -2372,7 +2407,7 @@ function playSurah(surahId) {
     }
   }
 
-  const cur = queue.current();
+  const cur = queue.current;
   const isFav = isFavorite(s.favorites, surahId, moshaf.id);
   store.setState({
     playback: {
@@ -2478,7 +2513,7 @@ function playAllFavorites() {
 }
 
 function playFromQueue(index) {
-  const item = queue.items()[index];
+  const item = queue.items[index];
   if (!item) return;
   queue.setIndexBySurah(item.surahId);
 
