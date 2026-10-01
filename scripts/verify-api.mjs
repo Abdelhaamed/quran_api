@@ -23,19 +23,24 @@ console.log('unique moshaf id:', unique.size, unique.size === moshafCount ? 'OK 
 console.log('suwar           :', suwar.length, suwar.length === 114 ? 'OK' : 'MISMATCH');
 console.log('riwayat         :', riwayat.length, riwayat.length === 20 ? 'OK' : 'MISMATCH');
 console.log('radios          :', radios.length, radios.length === 177 ? 'OK' : 'MISMATCH');
+
 // Every radio URL must be a plain audio stream the <audio> element can take
 // directly. deriveStyle is called here rather than trusted from the precomputed
 // m.style, so the harness actually exercises the classifier.
 if (radios.some((r) => !r.url)) throw new Error('a radio entry has no url');
-const unstyled = reciters.flatMap((r) => r.moshaf)
-  .filter((m) => deriveStyle(m.name) === '');
-console.log('unstyled moshaf :', unstyled.length, '→', unstyled.map((m) => m.name).join(' | '));
-if (unstyled.length > 1) throw new Error(`${unstyled.length} unstyled moshaf; extend deriveStyle`);
 
 const styles = new Set(reciters.flatMap((r) => r.moshaf.map((m) => deriveStyle(m.name))));
 for (const required of ['مرتّل', 'مجوّد', 'مميّزة'])
   if (!styles.has(required)) throw new Error(`deriveStyle lost the ${required} branch`);
 console.log('styles seen     :', [...styles].join(' | '));
+
+// Checked after the required branches so a deleted branch reports the specific
+// loss rather than the generic count. Only one live moshaf has no style word
+// (a 1387 AH historical recording), where '' is correct.
+const unstyled = reciters.flatMap((r) => r.moshaf)
+  .filter((m) => deriveStyle(m.name) === '');
+console.log('unstyled moshaf :', unstyled.length, '→', unstyled.map((m) => m.name).join(' | '));
+if (unstyled.length > 1) throw new Error(`${unstyled.length} unstyled moshaf; extend deriveStyle`);
 
 const byId = new Map(suwar.map((s) => [s.id, s]));
 const maaher = reciters.find((r) => r.moshaf.some((m) => m.surahTotal === 38));

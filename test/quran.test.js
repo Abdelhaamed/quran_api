@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { deriveStyle, surahUrl, buildPlaylist } from '../src/api/quran.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { deriveStyle, surahUrl, buildPlaylist, getReciters } from '../src/api/quran.js';
 
 describe('deriveStyle', () => {
   it('classifies the three styles present in the live corpus', () => {
@@ -67,14 +67,63 @@ describe('buildPlaylist', () => {
     expect(buildPlaylist(null, suwarById)).toEqual([]);
   });
 
-  it('passes surahList through verbatim, order preserved', () => {
-    // The brief expected buildPlaylist to drop 0 and -3, but that filter lives
-    // in getReciters, the only place surah_list is parsed. A moshaf's surahList
-    // is therefore already integers > 0 by the time it arrives here, so
-    // buildPlaylist trusts its input. Its `.filter(Boolean)` would drop the 0
-    // but keep the -3, so no reading of the current code yields [1, 18].
-    const moshaf = { server: 'https://s/', surahList: [0, 1, -3, 18] };
-    expect(buildPlaylist(moshaf, suwarById).map((x) => x.surahId)).toEqual([0, 1, -3, 18]);
-    expect(buildPlaylist(moshaf, suwarById)[0].title).toBe('سورة 0');
+  it('passes surahList through verbatim, in order', () => {
+    // buildPlaylist does NOT filter. It receives an already-parsed list from
+    // getReciters, which owns the validation. See the getReciters suite below
+    // for where the filtering is pinned.
+    const moshaf = { server: 'https://s/', surahList: [114, 1, 18] };
+    expect(buildPlaylist(moshaf, suwarById).map((x) => x.surahId)).toEqual([114, 1, 18]);
+  });
+});
+
+describe('getReciters parsing', () => {
+  // The surah_list filter lives in getReciters, so it is pinned here rather
+  // than by asserting it in buildPlaylist, which does not do it.
+  //
+  // The hooks live here rather than inside fetchStub: Vitest silently ignores a
+  // beforeEach registered once a test body is already running, so calling it
+  // from fetchStub left these three tests reading the live API — and each
+  // other's payloads. The stub reads `payload` at call time instead.
+  const original = globalThis.fetch;
+  let payload;
+  beforeEach(() => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true, status: 200, json: async () => payload,
+    });
+  });
+  afterEach(() => { globalThis.fetch = original; vi.restoreAllMocks(); });
+
+  const fetchStub = (p) => { payload = p; };
+
+  it('drops non-numeric and out-of-range surah_list entries', async () => {
+    fetchStub({
+      reciters: [{
+        id: 1, name: 'اختبار', letter: 'ا',
+        moshaf: [{ id: 5, name: 'حفص عن عاصم - مرتل', server: 'https://s/', surah_total: '4', surah_list: '0, 1, -3, x, 18,, 114' }],
+      }],
+    });
+    const [r] = await getReciters();
+    expect(r.moshaf[0].surahList).toEqual([1, 18, 114]);
+  });
+
+  it('derives style from the moshaf name, not moshaf_type', async () => {
+    fetchStub({
+      reciters: [{
+        id: 1, name: 'اختبار', letter: 'ا',
+        moshaf: [
+          { id: 5, name: 'حفص عن عاصم - مرتل', server: 'https://s/', surah_total: '114', surah_list: '1', moshaf_type: 11 },
+          { id: 6, name: 'المصحف المجود', server: 'https://s/', surah_total: '114', surah_list: '1', moshaf_type: 222 },
+        ],
+      }],
+    });
+    const [r] = await getReciters();
+    // 11 and 222 are opaque codes, so a numeric classification would be wrong.
+    expect(r.moshaf.map((m) => m.style)).toEqual(['مرتّل', 'مجوّد']);
+  });
+
+  it('tolerates a missing moshaf array', async () => {
+    fetchStub({ reciters: [{ id: 1, name: 'اختبار', letter: 'ا' }] });
+    const [r] = await getReciters();
+    expect(r.moshaf).toEqual([]);
   });
 });
