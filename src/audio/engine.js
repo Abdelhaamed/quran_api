@@ -25,6 +25,7 @@ export function createEngine() {
   let current = null;
   let retryUsed = false;
   let endedAt = 0;
+  let suppressPause = false;
 
   const emit = (event, detail) => {
     const set = listeners.get(event);
@@ -43,7 +44,7 @@ export function createEngine() {
 
   el.addEventListener('play', () => emit('play', current));
   el.addEventListener('pause', () => {
-    if (el.ended) return;
+    if (suppressPause) return;
     emit('pause', current);
   });
 
@@ -55,6 +56,14 @@ export function createEngine() {
     const now = Date.now();
     if (now - endedAt < ENDED_GUARD_MS) return;
     endedAt = now;
+    // Browsers fire `ended` and then QUEUE a separate `pause` task. A listener
+    // that auto-advances runs synchronously inside this dispatch, and the
+    // src=/load() it performs resets el.ended to false before that queued pause
+    // arrives — so reading el.ended in the pause handler would let the pause
+    // through and report the freshly-started track as paused. A local flag,
+    // cleared by play() and by the next macrotask as a backstop, survives it.
+    suppressPause = true;
+    setTimeout(() => { suppressPause = false; }, 0);
     emit('ended', current);
   });
 
@@ -79,13 +88,20 @@ export function createEngine() {
   async function play(item) {
     const changing = !current || current.url !== item.url;
     current = { ...item, loading: true };
+    suppressPause = false;
     emit('track', current);
 
-if (changing) {
-        retryUsed = false;
-        el.src = item.url;
-        el.load();
-      }
+    if (changing) {
+      // Re-arms the one-retry budget: without this, a single failed URL would
+      // disable retry for the rest of the session.
+      retryUsed = false;
+      el.src = item.url;
+      el.load();
+    }
+
+    // Emitted here rather than left to the browser's loadstart, so a same-URL
+    // resume still reports loading to a subscriber.
+    setLoading(true);
 
     try {
       await el.play();
@@ -113,6 +129,9 @@ if (changing) {
 
     seekBy(delta) {
       if (!current || current.seekable === false) return;
+      // A NaN or undefined delta would reach the currentTime setter and throw
+      // a TypeError on the non-finite value.
+      if (!Number.isFinite(delta)) return;
       const max = Number.isFinite(el.duration) ? el.duration : Infinity;
       el.currentTime = Math.min(Math.max(el.currentTime + delta, 0), max);
     },
@@ -134,11 +153,13 @@ if (changing) {
     },
 
     destroy() {
+      // Listeners cleared BEFORE el.pause(): pausing emits `pause`, so the
+      // other order would run every registered handler during teardown.
+      listeners.clear();
       el.pause();
       el.removeAttribute('src');
       el.load();
       el.remove();
-      listeners.clear();
     },
   };
 }

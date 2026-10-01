@@ -22,8 +22,10 @@ export function createMediaSession(handlers) {
   set('play', handlers.onPlay);
   set('pause', handlers.onPause);
   set('stop', handlers.onStop);
-  set('seekbackward', (e) => handlers.onSeekBy(-(e?.seekOffset || 10)));
-  set('seekforward', (e) => handlers.onSeekBy(e?.seekOffset || 10));
+  // `?? 10`, not `|| 10`: an explicit seekOffset of 0 is a real offset, and
+  // `||` would silently turn it into 10.
+  set('seekbackward', (e) => handlers.onSeekBy(-(e?.seekOffset ?? 10)));
+  set('seekforward', (e) => handlers.onSeekBy(e?.seekOffset ?? 10));
   set('previoustrack', handlers.onPrev);
   set('nexttrack', handlers.onNext);
 
@@ -55,7 +57,10 @@ export function createMediaSession(handlers) {
       try {
         ms.setPositionState({
           duration,
-          position: Math.min(currentTime, duration),
+          // Both ends clamped: Chrome throws a TypeError on a negative
+          // position, and the catch would swallow it, leaving the lock-screen
+          // position silently stale.
+          position: Math.min(Math.max(currentTime, 0), duration),
           playbackRate: rate,
         });
       } catch {

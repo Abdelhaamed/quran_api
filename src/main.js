@@ -3,10 +3,14 @@ import { createMediaSession } from './audio/mediaSession.js';
 
 const engine = createEngine();
 const session = createMediaSession({
-  onPlay: () => engine.play(engine.getCurrent()),
+  // getCurrent() is null before anything has played; calling play() with it
+  // would throw on `item.url`.
+  onPlay: () => { const c = engine.getCurrent(); if (c) engine.play(c); },
   onPause: () => engine.pause(),
   onStop: () => engine.pause(),
   onSeekBy: (d) => engine.seekBy(d),
+  // Wired to nothing yet: Task 6 attaches the queue. The device gate expects
+  // these lock-screen buttons to be inert, not to advance the queue.
   onNext: () => document.dispatchEvent(new CustomEvent('quran:next')),
   onPrev: () => document.dispatchEvent(new CustomEvent('quran:prev')),
 });

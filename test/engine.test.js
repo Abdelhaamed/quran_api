@@ -118,6 +118,123 @@ describe('engine', () => {
     expect(count).toBe(1);
   });
 
+  // B1. A real browser fires `ended` and then QUEUES a `pause` task. An
+  // auto-advance listener runs synchronously inside the `ended` dispatch and
+  // its src=/load() resets el.ended to false, so a `pause` handler that reads
+  // el.ended lets that queued pause through and reports the new track as
+  // paused. Reproduced here by dispatching `pause` immediately after `ended`,
+  // with el.ended forced true-and-then-reset exactly as load() would do it.
+  it('suppresses the pause a browser queues right after ended', async () => {
+    const pauses = [];
+    engine.on('pause', () => pauses.push('pause'));
+
+    Object.defineProperty(engine.element, 'ended', { configurable: true, value: true });
+    engine.element.dispatchEvent(new Event('ended'));
+    // The auto-advance: load() clears `ended` before the queued pause lands.
+    Object.defineProperty(engine.element, 'ended', { configurable: true, value: false });
+    engine.element.dispatchEvent(new Event('pause'));
+
+    expect(pauses).toEqual([]);
+  });
+
+  // The complement: the flag must not swallow a genuine pause forever. The
+  // setTimeout backstop clears it on the next macrotask.
+  it('still emits a pause that happens after the ended backstop clears', async () => {
+    const pauses = [];
+    engine.on('pause', () => pauses.push('pause'));
+
+    engine.element.dispatchEvent(new Event('ended'));
+    await new Promise((r) => setTimeout(r, 1));
+    engine.element.dispatchEvent(new Event('pause'));
+
+    expect(pauses).toEqual(['pause']);
+  });
+
+  // A resume during the suppression window must re-enable pause reporting,
+  // otherwise a subsequent real pause would be swallowed too.
+  it('re-arms pause reporting when play() is called during suppression', async () => {
+    const pauses = [];
+    engine.on('pause', () => pauses.push('pause'));
+
+    await engine.play(surah(1));
+    engine.element.dispatchEvent(new Event('ended'));
+    engine.element.dispatchEvent(new Event('pause'));
+    expect(pauses).toEqual([]);
+
+    await engine.play(surah(1));
+    engine.pause();
+    expect(pauses).toEqual(['pause']);
+  });
+
+  // B4. Without the re-arm, one failed URL would burn the retry budget for the
+  // whole session and every later track would fail on its first error.
+  it('re-arms the retry budget on each track change', () => {
+    const onError = vi.fn();
+    engine.on('error', onError);
+
+    engine.play(surah(1));
+    engine.element.dispatchEvent(new Event('error'));
+    engine.element.dispatchEvent(new Event('error'));
+    expect(onError).toHaveBeenCalledTimes(1);
+
+    onError.mockClear();
+    engine.play(surah(2));
+    engine.element.dispatchEvent(new Event('error'));
+    expect(onError).not.toHaveBeenCalled();
+    engine.element.dispatchEvent(new Event('error'));
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  // B3. play() emits loading itself, so a same-URL resume — where the browser
+  // fires no loadstart — still reports loading to a subscriber.
+  it('emits loading from play, including on a same-URL resume', async () => {
+    const seen = [];
+    engine.on('loading', (v) => seen.push(v));
+
+    await engine.play(surah(1));
+    await engine.play(surah(1));
+
+    expect(seen.filter(Boolean).length).toBeGreaterThanOrEqual(2);
+    expect(seen).toContain(true);
+  });
+
+  // B5. A forward delta past the end must stop at the duration, not past it.
+  it('clamps a forward seek at the duration', async () => {
+    await engine.play(surah(1));
+    Object.defineProperty(engine.element, 'duration', { configurable: true, value: 100 });
+    engine.element.currentTime = 90;
+    engine.seekBy(50);
+    expect(engine.element.currentTime).toBe(100);
+  });
+
+  it('resumes playback when restart is called on a paused element', async () => {
+    await engine.play(surah(1));
+    engine.pause();
+    expect(engine.element.paused).toBe(true);
+
+    engine.element.currentTime = 42;
+    engine.restart();
+
+    expect(engine.element.currentTime).toBe(0);
+    expect(engine.element.paused).toBe(false);
+  });
+
+  // B6. happy-dom's currentTime setter throws on a non-finite value, so an
+  // unguarded seekBy(NaN) throws out of the engine rather than being ignored.
+  it('ignores a non-finite seek delta instead of throwing', async () => {
+    await engine.play(surah(1));
+    engine.element.currentTime = 30;
+
+    expect(() => engine.seekBy(NaN)).not.toThrow();
+    expect(engine.element.currentTime).toBe(30);
+
+    expect(() => engine.seekBy(Infinity)).not.toThrow();
+    expect(engine.element.currentTime).toBe(30);
+
+    expect(() => engine.seekBy()).not.toThrow();
+    expect(engine.element.currentTime).toBe(30);
+  });
+
   it('retries a failed load once before reporting an error', () => {
     const onError = vi.fn();
     engine.on('error', onError);
@@ -183,12 +300,18 @@ describe('mediaSession', () => {
       value: {
         metadata: null,
         playbackState: 'none',
+        // NotSupportedError, matching what the real API throws for an
+        // unsupported action — a TypeError would model a different browser.
+        // `...impl.extra` is spread FIRST so a future extra cannot silently
+        // replace this recorder and make the assertions vacuous.
+        ...impl.extra,
         setActionHandler: (action, fn) => {
-          if (impl.unsupported?.includes(action)) throw new TypeError('unsupported');
+          if (impl.unsupported?.includes(action)) {
+            throw Object.assign(new Error('unsupported'), { name: 'NotSupportedError' });
+          }
           actions.set(action, fn);
           registered[action] = fn;
         },
-        ...impl.extra,
       },
     });
     vi.stubGlobal('MediaMetadata', class {
@@ -227,6 +350,9 @@ describe('mediaSession', () => {
     expect(h.onSeekBy).toHaveBeenLastCalledWith(-15);
     registered.seekbackward();
     expect(h.onSeekBy).toHaveBeenLastCalledWith(-10);
+    // An explicit 0 is a real offset, not a missing one.
+    registered.seekbackward({ seekOffset: 0 });
+    expect(h.onSeekBy).toHaveBeenLastCalledWith(-0);
   });
 
   it('passes a forward seekOffset through unchanged', () => {
@@ -234,6 +360,8 @@ describe('mediaSession', () => {
     createMediaSession(h);
     registered.seekforward({ seekOffset: 5 });
     expect(h.onSeekBy).toHaveBeenCalledWith(5);
+    registered.seekforward({ seekOffset: 0 });
+    expect(h.onSeekBy).toHaveBeenLastCalledWith(0);
   });
 
   it('routes play, pause and stop to their own handlers', () => {
@@ -255,13 +383,32 @@ describe('mediaSession', () => {
     expect(registered.play).toBe(h.onPlay);
   });
 
-  it('publishes metadata and playbackState on update', () => {
+  // The artwork array is asserted in full: a missing 512 entry or a repointed
+  // icon path both left the lock screen blank or low-res without failing
+  // anything that only checked title and artist.
+  it('publishes metadata including both artwork sizes on update', () => {
     const s = createMediaSession(handlers());
     s.update({ title: 'الفاتحة', artist: 'أبو بكر', isPlaying: true });
+
     expect(navigator.mediaSession.metadata.title).toBe('الفاتحة');
     expect(navigator.mediaSession.metadata.artist).toBe('أبو بكر');
+    expect(navigator.mediaSession.metadata.artwork).toEqual([
+      { src: '/quran_api/icons/icon-512.png', sizes: '192x192', type: 'image/png' },
+      { src: '/quran_api/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ]);
     expect(navigator.mediaSession.playbackState).toBe('playing');
+
     s.update({ title: 'البقرة' });
+    expect(navigator.mediaSession.playbackState).toBe('paused');
+  });
+
+  // B2. setState drives the lock-screen glyph, so each direction is asserted
+  // rather than only the one the other tests happened to exercise.
+  it('maps setState to the matching playbackState in both directions', () => {
+    const s = createMediaSession(handlers());
+    s.setState(true);
+    expect(navigator.mediaSession.playbackState).toBe('playing');
+    s.setState(false);
     expect(navigator.mediaSession.playbackState).toBe('paused');
   });
 
@@ -275,6 +422,18 @@ describe('mediaSession', () => {
     });
   });
 
+  // Chrome throws a TypeError on a negative position and the production catch
+  // would swallow it, leaving the lock-screen position silently stale.
+  it('clamps a negative position to zero', () => {
+    const setPositionState = vi.fn();
+    install({ extra: { setPositionState } });
+    const s = createMediaSession(handlers());
+    s.setPosition(-5, 100);
+    expect(setPositionState).toHaveBeenCalledWith({
+      duration: 100, position: 0, playbackRate: 1,
+    });
+  });
+
   it('skips setPosition when the duration is unknown, as for a radio stream', () => {
     const setPositionState = vi.fn();
     install({ extra: { setPositionState } });
@@ -285,9 +444,13 @@ describe('mediaSession', () => {
     expect(setPositionState).not.toHaveBeenCalled();
   });
 
+  // The size assertion comes first: `every` on an empty Map is true, so
+  // without it the test passes whenever nothing was registered at all.
   it('clears every handler it bound on destroy', () => {
     const s = createMediaSession(handlers());
+    expect(actions.size).toBe(7);
     s.destroy();
+    expect(actions.size).toBe(7);
     expect([...actions.values()].every((fn) => fn === null)).toBe(true);
   });
 
