@@ -86,6 +86,39 @@ describe('createStore', () => {
     spy.mockRestore();
   });
 
+  it('does not register a listener whose immediate call throws', async () => {
+    // This is the half of the leak that `typeof off === 'function'` cannot see.
+    // Registering the callback anyway would re-invoke the throw on every
+    // subsequent flush, so counting invocations across two setStates is what
+    // distinguishes the two orderings. Asserting only that an unsubscribe is
+    // returned passes under both, because both return one.
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const store = createStore({ n: 0 });
+    let calls = 0;
+    store.subscribe(() => { calls += 1; throw new Error('boom'); }, { immediate: true });
+    expect(calls).toBe(1);                 // the immediate call, and only that one
+
+    store.setState({ n: 1 });
+    await tick();
+    store.setState({ n: 2 });
+    await tick();
+
+    // 1 = never registered. 3 = registered, then re-invoked by both flushes.
+    expect(calls).toBe(1);
+    spy.mockRestore();
+  });
+
+  it('still delivers flushes to a listener whose immediate call succeeded', async () => {
+    const store = createStore({ n: 0 });
+    let calls = 0;
+    store.subscribe(() => { calls += 1; }, { immediate: true });
+    store.setState({ n: 1 });
+    await tick();
+    // Gates the other direction: gating registration must not break the normal
+    // path, or the fix would trade a leak for a silently dead subscription.
+    expect(calls).toBe(2);
+  });
+
   it('stops notifying after unsubscribe', async () => {
     const store = createStore({ n: 0 });
     const fn = vi.fn();

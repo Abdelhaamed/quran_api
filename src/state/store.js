@@ -37,16 +37,24 @@ export function createStore(initial) {
       }
     },
     subscribe(fn, { immediate = false } = {}) {
+      let ready = true;
       if (immediate) {
-        // Notify first: if fn throws, the listener was never registered, so
-        // subscribe still returns a working unsubscribe.
+        // Registration is gated on the immediate call succeeding. A callback
+        // that throws here is not yet able to render, and registering it anyway
+        // would re-invoke that throw on every subsequent flush — a repeating
+        // failure rather than a single skipped first render. The unsubscribe
+        // function is still returned below, so this is the only thing standing
+        // between a one-off throw and a listener that fails forever.
         try {
           fn(state, new Set(Object.keys(state)));
         } catch (err) {
           console.error('store immediate subscribe failed', err);
+          ready = false;
         }
       }
-      listeners.add(fn);
+      if (ready) listeners.add(fn);
+      // Returned either way: deleting an unregistered listener is a no-op, so
+      // the caller always gets a safe teardown handle.
       return () => listeners.delete(fn);
     },
   };

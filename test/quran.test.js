@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { deriveStyle, surahUrl, buildPlaylist, getReciters } from '../src/api/quran.js';
+import { deriveStyle, surahUrl, buildPlaylist, getReciters, getSuwar } from '../src/api/quran.js';
 
 describe('deriveStyle', () => {
   it('classifies every style present in the live corpus', () => {
@@ -68,6 +68,17 @@ describe('buildPlaylist', () => {
     expect(buildPlaylist(null, suwarById)).toEqual([]);
   });
 
+  it('returns an empty list when the moshaf has no surahList', () => {
+    // A moshaf cached by an older build carries no surahList, so `?? []` is the
+    // only thing between that cache and a TypeError on `.map`. `null` and
+    // missing are both pinned: `||` and `??` differ here only for falsy-but-set
+    // values, and an absent field is the realistic case.
+    expect(() => buildPlaylist({ server: 'https://s/' }, suwarById)).not.toThrow();
+    expect(buildPlaylist({ server: 'https://s/' }, suwarById)).toEqual([]);
+    expect(buildPlaylist({ server: 'https://s/', surahList: null }, suwarById)).toEqual([]);
+    expect(buildPlaylist({ server: 'https://s/', surahList: undefined }, suwarById)).toEqual([]);
+  });
+
   it('passes surahList through verbatim, in order', () => {
     // buildPlaylist does NOT filter. It receives an already-parsed list from
     // getReciters, which owns the validation. See the getReciters suite below
@@ -87,16 +98,23 @@ describe('getReciters parsing', () => {
   // for the wrong reason.
   const original = globalThis.fetch;
   let payload = null;
+  let status = 200;
 
   beforeEach(() => {
     payload = null;
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true, status: 200, json: async () => payload,
-    });
+    status = 200;
+    // Built fresh on every call so a test can flip the status mid-suite and the
+    // spy can still count round trips.
+    globalThis.fetch = vi.fn().mockImplementation(async () => (
+      status >= 200 && status < 300
+        ? { ok: true, status, json: async () => payload }
+        : { ok: false, status, json: async () => ({}) }
+    ));
   });
   afterEach(() => { globalThis.fetch = original; vi.restoreAllMocks(); });
 
   const fetchStub = (p) => { payload = p; };
+  const fetchStatus = (s) => { status = s; };
 
   it('drops non-numeric and out-of-range surah_list entries', async () => {
     fetchStub({
@@ -128,5 +146,27 @@ describe('getReciters parsing', () => {
     fetchStub({ reciters: [{ id: 1, name: 'اختبار', letter: 'ا' }] });
     const [r] = await getReciters();
     expect(r.moshaf).toEqual([]);
+  });
+
+  describe('retry policy', () => {
+    // retries: 0 on /reciters is not an optimisation, it is the difference
+    // between 6s and ~12.4s of silence before anything renders. Pinning it
+    // separately from the getJSON default keeps the two from drifting together.
+    it('issues exactly one fetch for reciters, even on a server error', async () => {
+      fetchStatus(503);
+      const spy = globalThis.fetch;
+      await getReciters().catch(() => {});
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the default retry on the smaller payloads', async () => {
+      // The other fetchers stay on getJSON's retries: 1, so a 503 costs two
+      // round trips. Without this the test above would also pass if retries: 0
+      // leaked into the default rather than being set per call site.
+      fetchStatus(503);
+      const spy = globalThis.fetch;
+      await getSuwar().catch(() => {});
+      expect(spy).toHaveBeenCalledTimes(2);
+    });
   });
 });
