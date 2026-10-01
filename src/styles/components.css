@@ -73,3 +73,220 @@
 @media (min-width: 768px) {
   .pl-controls { gap: var(--sp-3); }
 }
+
+/* ==========================================================================
+   App shell, grids and views (Task 6)
+   ========================================================================== */
+
+/* --on-gold is declared here rather than reused from a text token because the
+   text colour has to FLIP with the theme: --gold is a light gold in dark mode
+   (needing dark text) and a dark gold in light mode (needing light text). One
+   hard-coded colour would put ~2.1:1 on one of them. */
+:root { --on-gold: #241f1f; }
+[data-theme='light'] { --on-gold: #ffffff; }
+
+/* Appbar, search and tabs are ONE sticky group. As three separate
+   `position: sticky` siblings each needs the height of the one above it as a
+   pixel `top` offset, and those heights are content-derived — a safe-area
+   inset, a padded input, rem-based type — so the offsets are only ever right at
+   one device and one font size. The plan's version hardcoded 61px where the
+   search bar measures 72px, and the tabs sat 11px over the search field. One
+   group has no offsets to keep in sync. */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border-block-end: 1px solid var(--border);
+}
+
+.appbar {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  /* min-block-size, not block-size: --fs-* is rem so a raised root font size
+     makes the title taller, and a fixed 56px bar would clip it. Nothing offsets
+     this bar any more, so letting it grow costs nothing. */
+  min-block-size: var(--appbar-h);
+  padding: var(--sp-2) var(--sp-4);
+  padding-block-start: calc(var(--sp-2) + env(safe-area-inset-top));
+}
+.appbar-title { font-family: var(--font-quran); font-size: var(--fs-xl); font-weight: 700; }
+.appbar-actions { display: flex; gap: var(--sp-1); }
+.icon-btn { inline-size: var(--tap); block-size: var(--tap); border-radius: var(--r-full);
+  display: grid; place-items: center; font-size: var(--fs-lg); }
+.icon-btn:hover { background: var(--surface-hover); }
+
+.searchbar { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); }
+.search-icon { color: var(--text-faint); font-size: var(--fs-base); line-height: 1; }
+#search {
+  flex: 1; min-inline-size: 0; min-block-size: var(--tap);
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  color: var(--text);
+  /* base.css applies the unprefixed `appearance: none` to every control, and
+     Safari still needs the -webkit- form to drop a search field's own styling. */
+  -webkit-appearance: none;
+}
+#search::placeholder { color: var(--text-faint); }
+
+.tabs { display: flex; gap: var(--sp-1); padding: 0 var(--sp-4) var(--sp-2); }
+.tab { flex: 1; min-block-size: var(--tabs-h); border-radius: var(--r-md);
+  font-size: var(--fs-sm); color: var(--text-muted); white-space: nowrap; }
+.tab[aria-selected='true'] {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+/* In flow inside .topbar: a notice that overlaid the search field or the tabs
+   would cover the two controls needed to fix whatever it is reporting. */
+.banner { padding: var(--sp-2) var(--sp-4); background: var(--gold); color: var(--on-gold);
+  font-size: var(--fs-sm); text-align: center; }
+
+.views { max-inline-size: var(--content-max); margin-inline: auto; padding: var(--sp-4); }
+.view { display: grid; gap: var(--sp-3); }
+.grid { display: grid; gap: var(--sp-3); }
+.grid-reciters { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+.grid-surahs { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+.grid-fav { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+
+.card { position: relative; display: grid; gap: var(--sp-1); padding: var(--sp-4);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
+  text-align: start; transition: background .15s var(--ease), border-color .15s var(--ease); }
+.card:hover { background: var(--surface-hover); border-color: var(--accent); }
+.reciter.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.reciter-name { font-family: var(--font-quran); font-size: var(--fs-lg); font-weight: 700; }
+.reciter-meta { font-size: var(--fs-xs); color: var(--text-muted); }
+.chip { display: inline-block; padding: 2px var(--sp-2); border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--gold) 22%, transparent); color: var(--gold);
+  font-size: var(--fs-xs); margin-inline-end: var(--sp-1); }
+.chip.muted { background: var(--surface-hover); color: var(--text-faint); }
+
+/* Reader card: a plain wrapper whose only interactive parts are SIBLING buttons —
+   the head that expands it and one per riwaya. The card carries no padding so
+   the head button fills it and stays a full-size target; padding it here would
+   leave a dead strip around the head that looks tappable and is not. */
+.reciter { padding: 0; }
+.reciter-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  inline-size: 100%; padding: var(--sp-4); text-align: start; border-radius: var(--r-md);
+}
+.reciter-head:hover { background: var(--surface-hover); }
+/* min-inline-size: 0 so a long reciter name ellipsises instead of pushing the
+   caret off the card — the grid/flex default of min-width:auto refuses to shrink
+   below the content. */
+.reciter-text { display: grid; gap: var(--sp-1); min-inline-size: 0; }
+.reciter-caret { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--text-faint); line-height: 1; }
+
+.riwaya-list { display: grid; gap: var(--sp-1); padding: 0 var(--sp-2) var(--sp-2); }
+.riwaya {
+  display: grid; gap: var(--sp-1); inline-size: 100%; text-align: start;
+  padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--surface-hover) 60%, transparent);
+}
+.riwaya:hover { border-color: var(--accent); }
+.riwaya.is-on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.riwaya-name { font-size: var(--fs-sm); font-weight: 600; }
+.riwaya-meta { display: flex; align-items: center; gap: var(--sp-2);
+  font-size: var(--fs-xs); color: var(--text-muted); }
+/* The chip's own trailing margin would double the flex gap beside it. */
+.riwaya-meta .chip { margin-inline-end: 0; }
+
+/* Names the (reader, riwaya) pair the grid below belongs to, and carries the only
+   way back out of it. `overflow: hidden` on the children, not the row, so the
+   pair ellipsises on a 320px screen while the change button keeps its tap target. */
+.surah-head {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4); background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--r-md);
+}
+.surah-where { display: grid; gap: 2px; flex: 1; min-inline-size: 0; }
+.surah-where-reciter, .surah-where-riwaya {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.surah-where-reciter { font-family: var(--font-quran); font-size: var(--fs-lg); font-weight: 700; }
+.surah-where-riwaya { font-size: var(--fs-xs); color: var(--text-muted); }
+.surah-count { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--text-muted);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.btn-ghost {
+  flex: 0 0 auto; min-block-size: var(--tap); padding-inline: var(--sp-4);
+  border: 1px solid var(--accent); border-radius: var(--r-full);
+  color: var(--accent-strong); font-size: var(--fs-sm); white-space: nowrap;
+}
+.btn-ghost:hover { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+
+/* The card is a plain wrapper and the tappable area inside it is a real
+   <button>, so the heart beside it is not nested interactive content and Enter
+   and Space come from the platform instead of a hand-rolled keydown handler.
+   The card itself carries no padding: the button fills it, which is what makes
+   the whole card a target. */
+.surah { padding: 0; }
+.surah-open, .fav-open { display: grid; gap: var(--sp-1); inline-size: 100%;
+  border-radius: var(--r-md); }
+.surah-open { place-items: center; text-align: center; padding: var(--sp-4) var(--sp-2); }
+.fav-open { padding: var(--sp-4); }
+
+.surah-place { font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.surah-name { font-family: var(--font-quran); font-size: var(--fs-lg); font-weight: 700; }
+.ayah-badge { inline-size: 36px; block-size: 36px; display: grid; place-items: center;
+  border: 1px solid var(--gold); border-radius: var(--r-full); color: var(--gold);
+  font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.ayah-label { font-size: var(--fs-xs); color: var(--text-muted); }
+.surah.is-playing, .fav.is-playing {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.heart { position: absolute; inset-block-start: var(--sp-1); inset-inline-end: var(--sp-1);
+  inline-size: var(--tap); block-size: var(--tap); font-size: var(--fs-lg);
+  color: var(--text-faint); display: grid; place-items: center; }
+.heart.is-on { color: var(--danger); }
+
+.list { display: grid; gap: var(--sp-1); }
+.row { display: flex; align-items: center; gap: var(--sp-3); min-block-size: var(--tap);
+  padding: var(--sp-2) var(--sp-4); background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--r-md); text-align: start; }
+.row:hover { background: var(--surface-hover); }
+.row-dot { inline-size: 8px; block-size: 8px; border-radius: var(--r-full); background: var(--text-faint); }
+.row.is-playing .row-dot { background: var(--accent); }
+.row.is-playing .row-name { color: var(--accent-strong); }
+.row-name { font-size: var(--fs-sm); }
+
+/* A grid, not a bare block, so the favorites empty state can put its button
+   under the explanation with a real gap. */
+.empty { color: var(--text-muted); text-align: center; padding: var(--sp-6) var(--sp-4);
+  display: grid; gap: var(--sp-4); justify-items: center; }
+.fav-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.fav-count { font-size: var(--fs-sm); color: var(--text-muted); font-weight: 400; }
+.btn-primary { min-block-size: var(--tap); padding-inline: var(--sp-4); border-radius: var(--r-full);
+  background: var(--accent); color: var(--accent-contrast); font-weight: 600; }
+.btn-primary:hover { background: var(--accent-strong); }
+
+/* Offset by the player's MEASURED height, not by --player-h. That token is a
+   stale 88px while the player measures ~167px, and this toast sits at z-index
+   45 over the player's 40 — so a stale constant would paint the message on top
+   of the player. --player-space is written by the player itself and already
+   folds in its hidden state, the safe-area inset and the user's font size
+   (ruling R30). The 0px fallback covers the frame before the first measure. */
+.toast {
+  position: fixed;
+  inset-block-end: calc(var(--player-space, 0px) + var(--sp-4));
+  inset-inline: 0;
+  z-index: 45;
+  margin-inline: auto;
+  inline-size: fit-content;
+  max-inline-size: 90%;
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent);
+  box-shadow: var(--shadow);
+  font-size: var(--fs-sm);
+}

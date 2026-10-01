@@ -3,16 +3,83 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>مسبار محرك الصوت</title>
+<meta name="theme-color" content="#241f1f">
+<meta name="description" content="استماع لتلاوات القرآن الكريم بأصوات كبار القرّاء">
+<title>القرآن الكريم</title>
+<link rel="icon" href="/quran_api/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/quran_api/icons/apple-touch-icon.png">
+<script>
+  // Runs before first paint so the theme never flashes. The rule here is
+  // duplicated from applyTheme() in src/ui/shell.js, and the duplication is
+  // deliberate: this must not wait for the module graph, which cannot resolve
+  // before the first paint. If the two ever disagree the app visibly repaints
+  // the wrong theme, which is the flash this script exists to prevent — so
+  // test/ui.test.js boots the app and compares both results.
+  (function () {
+    try {
+      var saved = JSON.parse(localStorage.getItem('quran.state.v2') || '{}').theme || 'auto';
+      var dark = saved === 'dark' || (saved === 'auto' &&
+        matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    } catch (e) {
+      document.documentElement.dataset.theme = 'dark';
+    }
+  })();
+</script>
 </head>
 <body>
 <!--
-  Task 4 device-gate probe. Task 6 replaces this file wholesale, so nothing
-  here is product code. src/main.js appends the probe UI at runtime.
+  Appbar, search and tabs are ONE sticky group, not three stacked `position:
+  sticky` siblings. Stacking them needs each bar's height as a pixel offset
+  for the bar below it, and those heights are content-derived: the appbar has
+  a safe-area inset, the searchbar is padding plus an input. The plan's version
+  hardcoded 61px where the searchbar is really 72px, so the tabs sat 11px over
+  the search field, and no constant derived that way survives a raised root
+  font size. One group has no offsets to keep in sync. See .topbar in
+  src/styles/components.css.
 -->
-<p style="padding:16px;font-family:system-ui">
-  اضغط «Surah 1»، ثم اقفل الشاشة، وتأكد أن الصوت يستمر.
-</p>
+<header class="topbar">
+  <div class="appbar">
+    <h1 class="appbar-title">القرآن الكريم</h1>
+    <div class="appbar-actions">
+      <!-- Glyph seeded here so the button is never empty; createShell owns the
+           real value and rewrites it on boot. -->
+      <button id="theme-toggle" class="icon-btn" type="button" aria-label="تبديل السمة">&#x1F319;</button>
+      <button id="install" class="icon-btn" type="button" aria-label="تثبيت التطبيق" hidden>&#x1F4E6;</button>
+    </div>
+  </div>
+
+  <div class="searchbar">
+    <span class="search-icon" aria-hidden="true">&#x1F50D;</span>
+    <input id="search" type="search" inputmode="search" autocomplete="off"
+           placeholder="ابحث عن سورة أو قارئ" aria-label="ابحث عن سورة أو قارئ">
+  </div>
+
+  <nav class="tabs" role="tablist" aria-label="الأقسام">
+    <button id="tab-reciters" class="tab" role="tab" data-tab="reciters" aria-controls="view-reciters" aria-selected="true">القرّاء</button>
+    <button id="tab-surahs" class="tab" role="tab" data-tab="surahs" aria-controls="view-surahs" aria-selected="false">السور</button>
+    <button id="tab-favorites" class="tab" role="tab" data-tab="favorites" aria-controls="view-favorites" aria-selected="false">المفضلة</button>
+    <button id="tab-radio" class="tab" role="tab" data-tab="radio" aria-controls="view-radio" aria-selected="false">البث</button>
+  </nav>
+
+  <!-- In flow inside the sticky group, not a fixed bar: an offline notice that
+       overlays the search field or the tabs would cover the two controls the
+       user needs in order to fix the connection it is complaining about. -->
+  <div class="banner" id="banner" role="status" hidden></div>
+</header>
+
+<main class="views">
+  <section id="view-reciters" class="view" role="tabpanel" aria-labelledby="tab-reciters"></section>
+  <section id="view-surahs" class="view" role="tabpanel" aria-labelledby="tab-surahs" hidden></section>
+  <section id="view-favorites" class="view" role="tabpanel" aria-labelledby="tab-favorites" hidden></section>
+  <section id="view-radio" class="view" role="tabpanel" aria-labelledby="tab-radio" hidden></section>
+</main>
+
+<!-- No class: createPlayer adds `pl`, which is the class the stylesheet
+     styles. A second class name here would only be a second thing to keep in
+     step with it. -->
+<div id="player" hidden></div>
+<div class="toast" id="toast" role="status" hidden></div>
 <script type="module" src="/src/main.js"></script>
 </body>
 </html>
