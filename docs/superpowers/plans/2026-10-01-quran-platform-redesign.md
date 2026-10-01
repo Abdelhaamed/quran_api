@@ -1103,12 +1103,13 @@ immutable integers do not justify a second runtime dependency."
 
 **Files:**
 - Create: `src/api/client.js`, `src/api/quran.js`, `src/state/store.js`, `src/state/persist.js`
+- Create: `test/client.test.js`, `scripts/verify-api.mjs`
 
 **Interfaces:**
-- Produces: `getJSON(path, { signal, timeoutMs }): Promise<any>`
+- Produces: `getJSON(path, { signal, timeoutMs, retries }): Promise<any>`, `ApiError` with `.status`
 - Produces: `getReciters()`, `getSuwar()`, `getRiwayat()`, `getRadios()`, `deriveStyle(moshafName)`, `surahUrl(server, surahId)`, `buildPlaylist(moshaf, suwarById)`
 - Produces: `createStore(initial)` → `{ getState, setState, subscribe }`
-- Produces: `readState()`, `writeState(patch)`, `CACHE_TTL_MS`
+- Produces: `readState()`, `writeState(patch)`, `readCache(key)`, `writeCache(key, data)`, `CACHE_TTL_MS`
 
 - [ ] **Step 1: Create `src/api/client.js`**
 
@@ -1117,10 +1118,14 @@ const BASE = 'https://mp3quran.net/api/v3';
 const DEFAULT_TIMEOUT = 3000;
 
 export class ApiError extends Error {
-  constructor(message, cause) {
+  constructor(message, cause, status) {
     super(message);
     this.name = 'ApiError';
     this.cause = cause;
+    // status 0 means the request never produced a response (offline, DNS,
+    // timeout); 4xx/5xx carry the real code so callers can tell a bad path
+    // from a dead server.
+    this.status = status ?? 0;
   }
 }
 
@@ -1200,6 +1205,7 @@ export function deriveStyle(moshafName) {
   if (n.includes('المعلم')) return 'مُعلِّم';
   if (n.includes('مرتل')) return 'مرتّل';
   if (n.includes('مجود')) return 'مجوّد';
+  if (n.includes('مميزة')) return 'مميّزة';
   return '';
 }
 
@@ -1357,7 +1363,15 @@ export function writeCache(key, data) {
 Create `scripts/verify-api.mjs`:
 
 ```js
-import { getReciters, getSuwar, getRiwayat, getRadios, buildPlaylist } from '../src/api/quran.js';
+/**
+ * Live survey of the four `moshaf_type`-shaped collections, run before the UI
+ * work so field-name and classification mistakes surface here rather than in a
+ * component. Not shipped and not part of the build.
+ *
+ * Everything asserted below is a fact about the upstream API, not a preference.
+ * If one fails, the API changed — report it rather than editing the expectation.
+ */
+import { getReciters, getSuwar, getRiwayat, getRadios, buildPlaylist, deriveStyle } from '../src/api/quran.js';
 
 const reciters = await getReciters();
 const suwar = await getSuwar();
@@ -1378,11 +1392,11 @@ const styled = new Set(reciters.flatMap((r) => r.moshaf.map((m) => m.style)));
 console.log('styles seen     :', [...styled].join(' | '));
 
 // Every radio URL must be a plain audio stream the <audio> element can take
-// directly, and no moshaf may be left unclassified by accident.
+// directly. Four moshaf names carry no style word; `''` is the right answer
+// for them, so only a url-less radio entry is a failure.
 if (radios.some((r) => !r.url)) throw new Error('a radio entry has no url');
-console.log('unstyled moshaf :',
-  reciters.flatMap((r) => r.moshaf).filter((m) => m.style === '').length,
-  '(names are "<reciter> - <riwaya>", which carry no style word)');
+const unstyled = reciters.flatMap((r) => r.moshaf).filter((m) => m.style === '');
+console.log('unstyled moshaf :', unstyled.length, '→', unstyled.map((m) => m.name).join(' | '));
 
 const byId = new Map(suwar.map((s) => [s.id, s]));
 const maaher = reciters.find((r) => r.moshaf.some((m) => m.surahTotal === 38));
@@ -1393,12 +1407,11 @@ console.log('partial playlist:', maaher.name, '->', built.length, 'surahs');
 if (built.length !== 38) throw new Error(`expected 38 surahs, got ${built.length}`);
 console.log('partial url     :', built[0].title, built[0].url);
 
-// Every built playlist entry must resolve to a real surah and a zero-padded URL.
-for (const moshaf of [partial]) {
-  for (const entry of buildPlaylist(moshaf, byId)) {
-    if (!byId.has(entry.surahId)) throw new Error(`unknown surah ${entry.surahId}`);
-    if (!/\/\d{3}\.mp3$/.test(entry.url)) throw new Error(`bad url ${entry.url}`);
-  }
+// Every built entry must resolve to a real surah and a zero-padded URL, so a
+// dead link can never reach the player.
+for (const entry of built) {
+  if (!byId.has(entry.surahId)) throw new Error(`unknown surah ${entry.surahId}`);
+  if (!/\/\d{3}\.mp3$/.test(entry.url)) throw new Error(`bad url ${entry.url}`);
 }
 console.log('all playlist urls well-formed');
 ```
@@ -1406,15 +1419,108 @@ console.log('all playlist urls well-formed');
 Run: `node scripts/verify-api.mjs`
 Expected: reciters 241 OK, moshaf 287 OK, unique moshaf id OK, suwar 114 OK, riwayat 20 OK, and a non-zero styles list including مرتّل and مجوّد.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Write `test/client.test.js`**
+
+`messageFor` is the only user-facing text this layer produces, and three of its five branches cannot be reached against the live API. `fetch` is replaced per test, so no network is touched.
+
+```js
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { getJSON, ApiError } from '../src/api/client.js';
+
+const original = globalThis.fetch;
+afterEach(() => { globalThis.fetch = original; vi.restoreAllMocks(); });
+
+function stubFetch(response) {
+  const spy = vi.fn().mockResolvedValue(response);
+  globalThis.fetch = spy;
+  return spy;
+}
+
+const withStatus = (status) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  json: async () => ({}),
+});
+
+const ARABIC = /[\u0600-\u06FF]/;
+
+describe('getJSON error messages', () => {
+  it('maps 404 to Arabic', async () => {
+    stubFetch(withStatus(404));
+    await expect(getJSON('/nope')).rejects.toMatchObject({ status: 404 });
+    await expect(getJSON('/nope')).rejects.toThrow(ARABIC);
+  });
+
+  it('maps 5xx to Arabic', async () => {
+    stubFetch(withStatus(503));
+    await expect(getJSON('/boom')).rejects.toMatchObject({ status: 503 });
+    await expect(getJSON('/boom')).rejects.toThrow(ARABIC);
+  });
+
+  it('maps 403 to Arabic', async () => {
+    stubFetch(withStatus(403));
+    await expect(getJSON('/secret')).rejects.toMatchObject({ status: 403 });
+    await expect(getJSON('/secret')).rejects.toThrow(ARABIC);
+  });
+
+  it('never leaks the literal HTTP to the user', async () => {
+    for (const status of [400, 403, 404, 429, 500, 503]) {
+      stubFetch(withStatus(status));
+      await expect(getJSON(`/x/${status}`)).rejects.toSatisfy(
+        (e) => ARABIC.test(e.message) && !e.message.includes('HTTP'),
+      );
+    }
+  });
+
+  it('does not retry a 4xx', async () => {
+    const spy = stubFetch(withStatus(404));
+    await getJSON('/nope').catch(() => {});
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a 5xx exactly once', async () => {
+    const spy = stubFetch(withStatus(503));
+    await getJSON('/boom').catch(() => {});
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns parsed JSON on success', async () => {
+    stubFetch({ ok: true, status: 200, json: async () => ({ ok: 1 }) });
+    await expect(getJSON('/fine')).resolves.toEqual({ ok: 1 });
+  });
+
+  it('reports status 0 for a network failure', async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('failed'));
+    await expect(getJSON('/x', { retries: 0 })).rejects.toMatchObject({ status: 0 });
+  });
+
+  it('surfaces ApiError with a name', async () => {
+    stubFetch(withStatus(404));
+    await expect(getJSON('/nope')).rejects.toBeInstanceOf(ApiError);
+    await expect(getJSON('/nope')).rejects.toHaveProperty('name', 'ApiError');
+  });
+});
+```
+
+- [ ] **Step 7: Run everything**
+
+Run: `npm test && node scripts/verify-api.mjs && npm run build`
+Expected: all suites pass, `verify-api.mjs` exits 0 with every count exact, and the build completes. Assert exit codes, not literal test counts.
+
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/api src/state scripts/verify-api.mjs
+git add src/api src/state test/client.test.js scripts/verify-api.mjs
 git commit -m "feat: add API client, quran data layer, store, and persistence
 
-getJSON enforces a 3s timeout (6s for the 191KB reciter payload) and one
-retry, so a slow connection degrades instead of hanging. The store
-batches updates through queueMicrotask so a multi-key patch renders once."
+getJSON enforces a per-attempt timeout (6s for the 191KB reciter payload),
+retries only 5xx and network failures, and maps every failure path to
+Arabic copy so an HTTP status never reaches the user as an English
+string. ApiError keeps .status for programmatic callers.
+
+The store batches notifications through queueMicrotask so a multi-key
+patch renders once. deriveStyle parses the moshaf name rather than
+moshaf_type, whose real values are opaque codes like 11 and 222."
 ```
 
 ---
