@@ -2776,7 +2776,15 @@ export function createShell({ store }) {
 import { h, frag } from '../utils/dom.js';
 import { matchesAll } from '../utils/arabic.js';
 
-export function createRecitersView({ root, store, onSelect }) {
+/**
+ * Two explicit steps, as the user asked: pick the reciter, then pick one of that
+ * reciter's riwayas, then see only that riwaya's surahs.
+ *
+ * Tapping a reciter EXPANDS it in place rather than jumping straight to the
+ * surah grid, because a reciter's surah list depends on the riwaya: the same
+ * reader appears with 114 surahs under one riwaya and 38 under another.
+ */
+export function createRecitersView({ root, store, onSelectMoshaf }) {
   const grid = h('div', { class: 'grid grid-reciters' });
   root.append(grid);
 
@@ -2797,28 +2805,48 @@ export function createRecitersView({ root, store, onSelect }) {
     }
 
     const nodes = list.map((r) => {
-      const selected = r.moshaf.some((m) => m.id === s.selectedMoshafId);
-      const chips = r.moshaf.length
-        ? frag(r.moshaf.map((m) =>
-            h('span', { class: 'chip' }, m.style || m.name)))
-        : h('span', { class: 'chip muted' }, 'لا روايات');
+      const chosen = r.moshaf.some((m) => m.id === s.selectedMoshafId);
+      const open = s.expandedReciterId === r.id;
+      const totals = r.moshaf.map((m) => m.surahTotal || 0).join(' · ');
 
-      return h('button', {
-        class: `card reciter${selected ? ' is-selected' : ''}`,
-        type: 'button',
-        onclick: () => onSelect(r),
+      const card = h('div', {
+        class: `card reciter${chosen ? ' is-selected' : ''}${open ? ' is-open' : ''}`,
       },
-        h('span', { class: 'reciter-name' }, r.name),
-        h('span', { class: 'reciter-meta' },
-          `${r.moshaf.length} رواية · ${r.moshaf[0]?.surahTotal || 0} سورة`),
-        chips);
+        // The whole card toggles the riwaya list; it is a div, not a button, so
+        // the nested riwaya buttons are not inside another button.
+        h('button', {
+          class: 'reciter-head', type: 'button',
+          'aria-expanded': String(open),
+          onclick: () => store.setState({ expandedReciterId: open ? null : r.id }),
+        },
+          h('span', { class: 'reciter-name' }, r.name),
+          h('span', { class: 'reciter-meta' },
+            `${r.moshaf.length} رواية · ${totals} سورة`),
+          h('span', { class: 'reciter-caret', 'aria-hidden': 'true' },
+            open ? '▲' : '▼')),
+      );
+
+      if (open) {
+        card.append(r.moshaf.length
+          ? frag(r.moshaf.map((m) => h('button', {
+            class: `riwaya${m.id === s.selectedMoshafId ? ' is-on' : ''}`,
+            type: 'button',
+            onclick: () => onSelectMoshaf(r, m),
+          },
+            h('span', { class: 'riwaya-name' }, m.name),
+            h('span', { class: 'riwaya-meta' }, `${m.surahTotal} سورة`))))
+          : h('p', { class: 'empty' }, 'لا روايات متاحة لهذا القارئ'));
+      }
+
+      return card;
     });
 
     grid.replaceChildren(frag(nodes));
   }
 
   store.subscribe((s, keys) => {
-    if (keys.has('reciters') || keys.has('query') || keys.has('selectedMoshafId')) render();
+    if (keys.has('reciters') || keys.has('query') ||
+        keys.has('selectedMoshafId') || keys.has('expandedReciterId')) render();
   }, { immediate: true });
 
   return { render };
@@ -2833,20 +2861,31 @@ import { matchesAll } from '../utils/arabic.js';
 import { isFavorite } from '../utils/favorites.js';
 import { AYAH_COUNTS } from '../utils/ayah-counts.js';
 
-export function createSurahsView({ root, store, onPlay, onToggleFavorite }) {
+export function createSurahsView({ root, store, onPlay, onToggleFavorite, onChangeReciter }) {
+  const head = h('div', { class: 'surah-head' });
   const grid = h('div', { class: 'grid grid-surahs' });
-  root.append(grid);
+  root.append(head, grid);
 
   function render() {
     const s = store.getState();
     const moshaf = s.selectedMoshaf;
     grid.replaceChildren();
 
-    if (!moshaf) {
-      grid.append(h('p', { class: 'empty' },
-        'اختر قارئاً من تبويب «القرّاء» أولاً لعرض سوره'));
-      return;
-    }
+    // Always shows which reader and riwaya the surah list belongs to, and is
+    // the way back to changing either.
+    head.replaceChildren(moshaf
+      ? frag(
+        h('div', { class: 'surah-where' },
+          h('span', { class: 'surah-where-reciter' }, moshaf.reciterName),
+          h('span', { class: 'surah-where-riwaya' }, moshaf.name)),
+        h('button', {
+          class: 'btn-ghost', type: 'button',
+          onclick: () => onChangeReciter(moshaf.reciterId),
+        }, 'تغيير'),
+        h('span', { class: 'surah-count' }, `${moshaf.surahList.length} سورة`))
+      : h('p', { class: 'empty' }, 'اختر قارئاً ثم روايته من تبويب «القرّاء»'));
+
+    if (!moshaf) return;
 
     const ids = s.query
       ? moshaf.surahList.filter((id) =>
@@ -3144,6 +3183,7 @@ const store = createStore({
   offline: !navigator.onLine,
   reciters: [], suwarById: new Map(), riwayat: [], radios: [],
   selectedMoshafId: saved.selectedMoshafId ?? null,
+  expandedReciterId: saved.expandedReciterId ?? null,
   selectedMoshaf: null,
   playback: null,
   repeat: saved.repeat || 'off',
@@ -3157,7 +3197,7 @@ const moshafIndex = new Map();
 function indexMoshaf(reciters) {
   moshafIndex.clear();
   for (const r of reciters) {
-    for (const m of r.moshaf) moshafIndex.set(m.id, { ...m, reciterName: r.name });
+    for (const m of r.moshaf) moshafIndex.set(m.id, { ...m, reciterId: r.id, reciterName: r.name });
   }
 }
 const moshafOf = (id) => moshafIndex.get(id) || null;
@@ -3326,10 +3366,11 @@ createSearch({ store });
 createRecitersView({
   root: qs('#view-reciters'),
   store,
-  onSelect(reciter) {
-    const first = reciter.moshaf[0];
-    store.setState({ selectedMoshafId: first.id, activeTab: 'surahs' });
-    writeState({ selectedMoshafId: first.id });
+  // Explicit riwaya choice, per the user: the surah list depends on which
+  // riwaya is selected, so the reader's first riwaya is never auto-selected.
+  onSelectMoshaf(reciter, moshaf) {
+    store.setState({ selectedMoshafId: moshaf.id, activeTab: 'surahs' });
+    writeState({ selectedMoshafId: moshaf.id });
     resolveMoshaf();
   },
 });
@@ -3338,6 +3379,11 @@ createSurahsView({
   root: qs('#view-surahs'), store,
   onPlay: (id) => playSurah(id),
   onToggleFavorite: (id) => toggleSurah(id, store.getState().selectedMoshafId),
+  onChangeReciter(reciterId) {
+    // Back to the readers tab with that reader already expanded, so changing
+    // riwaya is one tap instead of hunting for the reader again.
+    store.setState({ expandedReciterId: reciterId, activeTab: 'reciters' });
+  },
 });
 
 createFavoritesView({
