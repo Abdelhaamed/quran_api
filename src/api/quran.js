@@ -15,7 +15,10 @@ export function deriveStyle(moshafName) {
 }
 
 export async function getReciters(signal) {
-  const data = await getJSON('/reciters?language=ar', { signal, timeoutMs: 6000 });
+  // retries: 0 — this is the 191KB payload with a 6s per-attempt timeout, so a
+  // retry would push the worst case to ~12.4s of silence. The 24h cache means
+  // this rarely runs at all, and cached data renders first regardless.
+  const data = await getJSON('/reciters?language=ar', { signal, timeoutMs: 6000, retries: 0 });
   return (data.reciters || []).map((r) => ({
     id: r.id,
     name: r.name,
@@ -64,8 +67,11 @@ export function surahUrl(server, surahId) {
 
 /** Playlist is built from the moshaf's own surah_list, never the global list. */
 export function buildPlaylist(moshaf, suwarById) {
+  // `?? []` so a moshaf arriving from an older cache without surahList yields an
+  // empty playlist rather than a TypeError on `.map`. Filtering is NOT done
+  // here — getReciters owns validation of surah_list.
   if (!moshaf) return [];
-  return moshaf.surahList
+  return (moshaf.surahList ?? [])
     .map((id) => {
       const meta = suwarById.get(id);
       return {
@@ -73,6 +79,5 @@ export function buildPlaylist(moshaf, suwarById) {
         title: meta?.name || `سورة ${id}`,
         url: surahUrl(moshaf.server, id),
       };
-    })
-    .filter(Boolean);
+    });
 }

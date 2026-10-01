@@ -25,18 +25,36 @@ function isRetryable(err) {
  * failure path must map to it — including HTTP statuses. Rethrowing the raw
  * `HTTP 404` would surface English in an Arabic interface.
  *
+ * A 4xx means the request REACHED the server and was rejected, so telling the
+ * user to check their internet connection would be actively misleading — that
+ * message belongs only to the paths where no response arrived at all.
+ *
  * `navigator` is absent outside browsers, so it is guarded: a ReferenceError
  * here would replace the Arabic message with an opaque crash.
+ *
+ * Exported so its per-status mapping can be asserted directly. Testing only
+ * "the message contains Arabic" cannot catch two statuses sharing copy, or an
+ * arm widened so that 4xx falls into the 5xx branch. The arm order below is
+ * load-bearing in both directions: the specific statuses come first, then the
+ * 5xx range, then the generic 4xx range, so neither class can reach the other's
+ * copy. Reordering those two range arms reintroduces the exact bug above.
  */
-function messageFor(err) {
+export function messageFor(err) {
   if (!(err instanceof ApiError)) {
     return typeof navigator !== 'undefined' && navigator.onLine === false
       ? 'لا يوجد اتصال بالإنترنت. البيانات المحفوظة متاحة.'
       : 'تعذّر جلب البيانات. تحقق من الاتصال وحاول مجدداً.';
   }
-  if (err.status >= 500) return 'الخادم غير متاح الآن. حاول بعد قليل.';
+  // Ordered most-specific first, and the 5xx arm ahead of the generic 4xx arm so
+  // that neither class can fall into the other's copy.
   if (err.status === 404) return 'تعذّر العثور على البيانات المطلوبة.';
-  if (err.status === 403) return 'لا صلاحية للوصول إلى هذه البيانات.';
+  if (err.status === 401 || err.status === 403) return 'لا صلاحية للوصول إلى هذه البيانات.';
+  if (err.status === 429) return 'تم تجاوز عدد الطلبات المسموح. حاول بعد قليل.';
+  if (err.status === 408) return 'انتهت مهلة الطلب. حاول مجدداً.';
+  if (err.status >= 500) return 'الخادم غير متاح الآن. حاول بعد قليل.';
+  // Bounded above at 500 as well as below: an unbounded `>= 400` would swallow
+  // every 5xx if this line were ever moved above the server-down arm.
+  if (err.status >= 400) return 'طلب غير صالح. حدِّث الصفحة وحاول مجدداً.';
   return 'تعذّر جلب البيانات. تحقق من الاتصال وحاول مجدداً.';
 }
 

@@ -2,27 +2,28 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { deriveStyle, surahUrl, buildPlaylist, getReciters } from '../src/api/quran.js';
 
 describe('deriveStyle', () => {
-  it('classifies the three styles present in the live corpus', () => {
+  it('classifies every style present in the live corpus', () => {
     expect(deriveStyle('حفص عن عاصم - مرتل')).toBe('مرتّل');
     expect(deriveStyle('المصحف المجود')).toBe('مجوّد');
     expect(deriveStyle('المصحف المعلم')).toBe('مُعلِّم');
     expect(deriveStyle('حفص عن عاصم - تلاوة مميزة')).toBe('مميّزة');
   });
 
-  it('does not confuse المجود with مجود', () => {
-    // Both fold to مجوّد because المجود contains مجود as a substring, so the
-    // separate branch that used to exist for it was dead.
-    expect(deriveStyle('المصحف المجود')).toBe(deriveStyle('مجود'));
+  it('matches مجود without requiring the definite article', () => {
+    // Asserted against the branch's return value, not equality between two
+    // inputs: comparing 'المصحف المجود' to 'مجود' would still pass with the
+    // whole branch deleted, since both would fall through to ''.
+    expect(deriveStyle('مجود')).toBe('مجوّد');
+    expect(deriveStyle('المصحف المجود')).toBe('مجوّد');
   });
 
   it('returns empty for a riwaya name with no style word', () => {
-    expect(deriveStyle('ورش عن نافع من طريق الأزرق - مرتل')).toBe('مرتّل');
     expect(deriveStyle('حفص عن عاصم - تسجيل عام 1387 هـ - 1967م')).toBe('');
     expect(deriveStyle('')).toBe('');
     expect(deriveStyle(undefined)).toBe('');
   });
 
-  it('is case and whitespace insensitive', () => {
+  it('ignores surrounding whitespace', () => {
     expect(deriveStyle('  مرتل  ')).toBe('مرتّل');
   });
 });
@@ -80,13 +81,15 @@ describe('getReciters parsing', () => {
   // The surah_list filter lives in getReciters, so it is pinned here rather
   // than by asserting it in buildPlaylist, which does not do it.
   //
-  // The hooks live here rather than inside fetchStub: Vitest silently ignores a
-  // beforeEach registered once a test body is already running, so calling it
-  // from fetchStub left these three tests reading the live API — and each
-  // other's payloads. The stub reads `payload` at call time instead.
+  // The hooks live in the describe body, never inside a helper called from an
+  // `it`: Vitest silently ignores a beforeEach registered once a test body is
+  // already running, which left these tests reading the live API and passing
+  // for the wrong reason.
   const original = globalThis.fetch;
-  let payload;
+  let payload = null;
+
   beforeEach(() => {
+    payload = null;
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true, status: 200, json: async () => payload,
     });

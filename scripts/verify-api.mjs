@@ -1,10 +1,12 @@
 /**
- * Live survey of the four `moshaf_type`-shaped collections, run before the UI
- * work so field-name and classification mistakes surface here rather than in a
- * component. Not shipped and not part of the build.
+ * Live survey of the data layer, run before the UI work so field-name and
+ * classification mistakes surface here rather than in a component. Not shipped
+ * and not part of the build.
  *
- * Everything asserted below is a fact about the upstream API, not a preference.
- * If one fails, the API changed — report it rather than editing the expectation.
+ * Every count below is ENFORCED with a throw, not merely printed. A printed
+ * MISMATCH with exit 0 is worse than no check: the workflow would go green
+ * while the data layer silently changed shape. These are facts about the
+ * upstream API, not preferences — if one fails, report it, do not edit it.
  */
 import { getReciters, getSuwar, getRiwayat, getRadios, buildPlaylist, deriveStyle } from '../src/api/quran.js';
 
@@ -17,12 +19,21 @@ const moshafCount = reciters.reduce((n, r) => n + r.moshaf.length, 0);
 const ids = reciters.flatMap((r) => r.moshaf.map((m) => m.id));
 const unique = new Set(ids);
 
-console.log('reciters        :', reciters.length, reciters.length === 241 ? 'OK' : 'MISMATCH');
-console.log('moshaf          :', moshafCount, moshafCount === 287 ? 'OK' : 'MISMATCH');
-console.log('unique moshaf id:', unique.size, unique.size === moshafCount ? 'OK (globally unique)' : 'COLLISION');
-console.log('suwar           :', suwar.length, suwar.length === 114 ? 'OK' : 'MISMATCH');
-console.log('riwayat         :', riwayat.length, riwayat.length === 20 ? 'OK' : 'MISMATCH');
-console.log('radios          :', radios.length, radios.length === 177 ? 'OK' : 'MISMATCH');
+const expect = (label, actual, wanted) => {
+  const ok = actual === wanted;
+  console.log(`${label.padEnd(17)}:`, actual, ok ? 'OK' : `MISMATCH (expected ${wanted})`);
+  if (!ok) throw new Error(`${label}: got ${actual}, expected ${wanted}`);
+};
+
+expect('reciters', reciters.length, 241);
+expect('moshaf', moshafCount, 287);
+// The whole favorites key is `${surahId}:${moshafId}`, so this invariant is
+// load-bearing: a collision would silently merge two reciters' entries.
+expect('unique moshaf id', unique.size, moshafCount);
+expect('suwar', suwar.length, 114);
+expect('riwayat', riwayat.length, 20);
+expect('radios', radios.length, 177);
+expect('meccan suwar', suwar.filter((s) => s.isMeccan).length, 86);
 
 // Every radio URL must be a plain audio stream the <audio> element can take
 // directly. deriveStyle is called here rather than trusted from the precomputed
@@ -40,7 +51,11 @@ console.log('styles seen     :', [...styles].join(' | '));
 const unstyled = reciters.flatMap((r) => r.moshaf)
   .filter((m) => deriveStyle(m.name) === '');
 console.log('unstyled moshaf :', unstyled.length, '→', unstyled.map((m) => m.name).join(' | '));
-if (unstyled.length > 1) throw new Error(`${unstyled.length} unstyled moshaf; extend deriveStyle`);
+if (unstyled.length !== 1) throw new Error(`${unstyled.length} unstyled moshaf; extend deriveStyle`);
+
+// makkia must be read, not type: they are exact inverses, so reading the wrong
+// one inverts Meccan and Medinan for all 114 surahs.
+expect('medinan suwar', suwar.filter((s) => !s.isMeccan).length, 28);
 
 const byId = new Map(suwar.map((s) => [s.id, s]));
 const maaher = reciters.find((r) => r.moshaf.some((m) => m.surahTotal === 38));
