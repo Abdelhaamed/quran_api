@@ -904,11 +904,11 @@ cross-checked against the canonical total of 6236 ayat.
  * second runtime dependency.
  *
  * Written as an explicit id:value map, NOT a positional array: an earlier
- * draft used a bare array and silently omitted Al-Ma'idah, which shifted every
+ * draft used a bare array and silently omitted Al-Maidah, which shifted every
  * surah from 5 onward. Keying by id makes that class of error impossible.
  *
  * Verified against two independent live sources that agree exactly, and against
- * the canonical total of 6236 ayat: 114 keys, Al-Fatihah=7, Al-Ma'idah=120,
+ * the canonical total of 6236 ayat: 114 keys, Al-Fatihah=7, Al-Maidah=120,
  * Al-Kahf=110, An-Nas=6.
  */
 const COUNTS = {
@@ -956,7 +956,7 @@ describe('AYAH_COUNTS', () => {
     expect(ayahCount(114)).toBe(6);
   });
 
-  it('has Al-Ma'idah at 120, the value an earlier draft dropped', () => {
+  it('has surah 5 at 120, the value an earlier draft dropped', () => {
     expect(ayahCount(5)).toBe(120);
   });
 
