@@ -1103,7 +1103,7 @@ immutable integers do not justify a second runtime dependency."
 
 **Files:**
 - Create: `src/api/client.js`, `src/api/quran.js`, `src/state/store.js`, `src/state/persist.js`
-- Create: `test/client.test.js`, `scripts/verify-api.mjs`
+- Create: `test/client.test.js`, `test/quran.test.js`, `scripts/verify-api.mjs`
 
 **Interfaces:**
 - Produces: `getJSON(path, { signal, timeoutMs, retries }): Promise<any>`, `ApiError` with `.status`
@@ -1388,12 +1388,23 @@ console.log('unique moshaf id:', unique.size, unique.size === moshafCount ? 'OK 
 console.log('suwar           :', suwar.length, suwar.length === 114 ? 'OK' : 'MISMATCH');
 console.log('riwayat         :', riwayat.length, riwayat.length === 20 ? 'OK' : 'MISMATCH');
 console.log('radios          :', radios.length, radios.length === 177 ? 'OK' : 'MISMATCH');
-const styled = new Set(reciters.flatMap((r) => r.moshaf.map((m) => m.style)));
-console.log('styles seen     :', [...styled].join(' | '));
+// Every radio URL must be a plain audio stream the <audio> element can take
+// directly. deriveStyle is called here rather than trusted from the precomputed
+// m.style, so the harness actually exercises the classifier.
+if (radios.some((r) => !r.url)) throw new Error('a radio entry has no url');
+const unstyled = reciters.flatMap((r) => r.moshaf)
+  .filter((m) => deriveStyle(m.name) === '');
+console.log('unstyled moshaf :', unstyled.length, '→', unstyled.map((m) => m.name).join(' | '));
+if (unstyled.length > 1) throw new Error(`${unstyled.length} unstyled moshaf; extend deriveStyle`);
+
+const styles = new Set(reciters.flatMap((r) => r.moshaf.map((m) => deriveStyle(m.name))));
+for (const required of ['مرتّل', 'مجوّد', 'مميّزة'])
+  if (!styles.has(required)) throw new Error(`deriveStyle lost the ${required} branch`);
+console.log('styles seen     :', [...styles].join(' | '));
 
 // Every radio URL must be a plain audio stream the <audio> element can take
-// directly. Four moshaf names carry no style word; `''` is the right answer
-// for them, so only a url-less radio entry is a failure.
+// directly. deriveStyle is called here rather than trusted from the precomputed
+// m.style, so the harness actually exercises the classifier.
 if (radios.some((r) => !r.url)) throw new Error('a radio entry has no url');
 const unstyled = reciters.flatMap((r) => r.moshaf).filter((m) => m.style === '');
 console.log('unstyled moshaf :', unstyled.length, '→', unstyled.map((m) => m.name).join(' | '));
@@ -1502,15 +1513,96 @@ describe('getJSON error messages', () => {
 });
 ```
 
-- [ ] **Step 7: Run everything**
+- [ ] **Step 7: Write `test/quran.test.js`**
+
+`deriveStyle` is pure and is the function that would silently mislabel 215 reciters if it drifted, so it gets its own unit coverage against the real names the live API returns.
+
+```js
+import { describe, it, expect } from 'vitest';
+import { deriveStyle, surahUrl, buildPlaylist } from '../src/api/quran.js';
+
+describe('deriveStyle', () => {
+  it('classifies the three styles present in the live corpus', () => {
+    expect(deriveStyle('حفص عن عاصم - مرتل')).toBe('مرتّل');
+    expect(deriveStyle('المصحف المجود')).toBe('مجوّد');
+    expect(deriveStyle('المصحف المعلم')).toBe('مُعلِّم');
+    expect(deriveStyle('حفص عن عاصم - تلاوة مميزة')).toBe('مميّزة');
+  });
+
+  it('does not confuse المجود with مجود', () => {
+    // Both fold to مجوّد because المجود contains مجود as a substring, so the
+    // separate branch that used to exist for it was dead.
+    expect(deriveStyle('المصحف المجود')).toBe(deriveStyle('مجود'));
+  });
+
+  it('returns empty for a riwaya name with no style word', () => {
+    expect(deriveStyle('ورش عن نافع من طريق الأزرق - مرتل')).toBe('مرتّل');
+    expect(deriveStyle('حفص عن عاصم - تسجيل عام 1387 هـ - 1967م')).toBe('');
+    expect(deriveStyle('')).toBe('');
+    expect(deriveStyle(undefined)).toBe('');
+  });
+
+  it('is case and whitespace insensitive', () => {
+    expect(deriveStyle('  مرتل  ')).toBe('مرتّل');
+  });
+});
+
+describe('surahUrl', () => {
+  it('zero-pads the surah id to three digits', () => {
+    expect(surahUrl('https://server6.mp3quran.net/akdr/', 1)).toBe('https://server6.mp3quran.net/akdr/001.mp3');
+    expect(surahUrl('https://server6.mp3quran.net/akdr/', 18)).toBe('https://server6.mp3quran.net/akdr/018.mp3');
+    expect(surahUrl('https://server6.mp3quran.net/akdr/', 114)).toBe('https://server6.mp3quran.net/akdr/114.mp3');
+  });
+
+  it('accepts a string id', () => {
+    expect(surahUrl('https://s/', '7')).toBe('https://s/007.mp3');
+  });
+});
+
+describe('buildPlaylist', () => {
+  const suwarById = new Map([
+    [1, { id: 1, name: 'الفاتحة' }],
+    [18, { id: 18, name: 'الكهف' }],
+    [114, { id: 114, name: 'الناس' }],
+  ]);
+
+  it('builds from the moshaf surahList, not the full 114', () => {
+    const moshaf = { server: 'https://s/', surahList: [1, 18] };
+    const list = buildPlaylist(moshaf, suwarById);
+    expect(list.map((x) => x.surahId)).toEqual([1, 18]);
+    expect(list[1]).toEqual({ surahId: 18, title: 'الكهف', url: 'https://s/018.mp3' });
+  });
+
+  it('honours a partial surah_list', () => {
+    const moshaf = { server: 'https://s/', surahList: [18] };
+    expect(buildPlaylist(moshaf, suwarById)).toHaveLength(1);
+  });
+
+  it('falls back to a generic title when metadata is missing', () => {
+    const moshaf = { server: 'https://s/', surahList: [99] };
+    expect(buildPlaylist(moshaf, suwarById)[0].title).toBe('سورة 99');
+  });
+
+  it('returns an empty list when there is no moshaf', () => {
+    expect(buildPlaylist(null, suwarById)).toEqual([]);
+  });
+
+  it('ignores non-numeric and out-of-range entries in surahList', () => {
+    const moshaf = { server: 'https://s/', surahList: [0, 1, -3, 18] };
+    expect(buildPlaylist(moshaf, suwarById).map((x) => x.surahId)).toEqual([1, 18]);
+  });
+});
+```
+
+- [ ] **Step 8: Run everything**
 
 Run: `npm test && node scripts/verify-api.mjs && npm run build`
 Expected: all suites pass, `verify-api.mjs` exits 0 with every count exact, and the build completes. Assert exit codes, not literal test counts.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/api src/state test/client.test.js scripts/verify-api.mjs
+git add src/api src/state test/client.test.js test/quran.test.js scripts/verify-api.mjs
 git commit -m "feat: add API client, quran data layer, store, and persistence
 
 getJSON enforces a per-attempt timeout (6s for the 191KB reciter payload),
