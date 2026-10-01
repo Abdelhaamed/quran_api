@@ -1,4 +1,12 @@
-import { getReciters, getSuwar, getRiwayat, getRadios, buildPlaylist } from '../src/api/quran.js';
+/**
+ * Live survey of the four `moshaf_type`-shaped collections, run before the UI
+ * work so field-name and classification mistakes surface here rather than in a
+ * component. Not shipped and not part of the build.
+ *
+ * Everything asserted below is a fact about the upstream API, not a preference.
+ * If one fails, the API changed — report it rather than editing the expectation.
+ */
+import { getReciters, getSuwar, getRiwayat, getRadios, buildPlaylist, deriveStyle } from '../src/api/quran.js';
 
 const reciters = await getReciters();
 const suwar = await getSuwar();
@@ -19,11 +27,11 @@ const styled = new Set(reciters.flatMap((r) => r.moshaf.map((m) => m.style)));
 console.log('styles seen     :', [...styled].join(' | '));
 
 // Every radio URL must be a plain audio stream the <audio> element can take
-// directly, and no moshaf may be left unclassified by accident.
+// directly. Four moshaf names carry no style word; `''` is the right answer
+// for them, so only a url-less radio entry is a failure.
 if (radios.some((r) => !r.url)) throw new Error('a radio entry has no url');
-console.log('unstyled moshaf :',
-  reciters.flatMap((r) => r.moshaf).filter((m) => m.style === '').length,
-  '(names are "<reciter> - <riwaya>", which carry no style word)');
+const unstyled = reciters.flatMap((r) => r.moshaf).filter((m) => m.style === '');
+console.log('unstyled moshaf :', unstyled.length, '→', unstyled.map((m) => m.name).join(' | '));
 
 const byId = new Map(suwar.map((s) => [s.id, s]));
 const maaher = reciters.find((r) => r.moshaf.some((m) => m.surahTotal === 38));
@@ -34,11 +42,10 @@ console.log('partial playlist:', maaher.name, '->', built.length, 'surahs');
 if (built.length !== 38) throw new Error(`expected 38 surahs, got ${built.length}`);
 console.log('partial url     :', built[0].title, built[0].url);
 
-// Every built playlist entry must resolve to a real surah and a zero-padded URL.
-for (const moshaf of [partial]) {
-  for (const entry of buildPlaylist(moshaf, byId)) {
-    if (!byId.has(entry.surahId)) throw new Error(`unknown surah ${entry.surahId}`);
-    if (!/\/\d{3}\.mp3$/.test(entry.url)) throw new Error(`bad url ${entry.url}`);
-  }
+// Every built entry must resolve to a real surah and a zero-padded URL, so a
+// dead link can never reach the player.
+for (const entry of built) {
+  if (!byId.has(entry.surahId)) throw new Error(`unknown surah ${entry.surahId}`);
+  if (!/\/\d{3}\.mp3$/.test(entry.url)) throw new Error(`bad url ${entry.url}`);
 }
 console.log('all playlist urls well-formed');

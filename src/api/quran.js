@@ -10,6 +10,7 @@ export function deriveStyle(moshafName) {
   if (n.includes('المعلم')) return 'مُعلِّم';
   if (n.includes('مرتل')) return 'مرتّل';
   if (n.includes('مجود')) return 'مجوّد';
+  if (n.includes('مميزة')) return 'مميّزة';
   return '';
 }
 
