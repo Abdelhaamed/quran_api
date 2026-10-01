@@ -1158,12 +1158,15 @@ export function messageFor(err) {
       ? 'لا يوجد اتصال بالإنترنت. البيانات المحفوظة متاحة.'
       : 'تعذّر جلب البيانات. تحقق من الاتصال وحاول مجدداً.';
   }
+  // Range arms are ordered >= 500 BEFORE >= 400: 500 satisfies both, so putting
+  // >= 400 first would make the server-error arm unreachable and hand 5xx the
+  // invalid-request copy.
   if (err.status === 404) return 'تعذّر العثور على البيانات المطلوبة.';
   if (err.status === 401 || err.status === 403) return 'لا صلاحية للوصول إلى هذه البيانات.';
   if (err.status === 429) return 'تم تجاوز عدد الطلبات المسموح. حاول بعد قليل.';
   if (err.status === 408) return 'انتهت مهلة الطلب. حاول مجدداً.';
-  if (err.status >= 400) return 'طلب غير صالح. حدِّث الصفحة وحاول مجدداً.';
   if (err.status >= 500) return 'الخادم غير متاح الآن. حاول بعد قليل.';
+  if (err.status >= 400) return 'طلب غير صالح. حدِّث الصفحة وحاول مجدداً.';
   return 'تعذّر جلب البيانات. تحقق من الاتصال وحاول مجدداً.';
 }
 
@@ -1318,6 +1321,11 @@ export function createStore(initial) {
   return {
     getState() { return state; },
     setState(patch) {
+      // Compared with Object.is, not ===, so a NaN -> NaN write counts as
+      // unchanged too. Only genuinely changed keys are announced: a view that
+      // writes a value it already holds should not cause a render.
+      const changed = Object.keys(patch).filter((k) => !Object.is(state[k], patch[k]));
+      if (changed.length === 0) return;
       state = { ...state, ...patch };
       pendingKeys = new Set([...pendingKeys, ...Object.keys(patch)]);
       if (!queued) {
@@ -1350,6 +1358,12 @@ Batching through `queueMicrotask` keeps a multi-key update from triggering sever
 const KEY = 'quran.state.v2';
 const KEY_CACHE = 'quran.cache.v2';
 export const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+// Every localStorage access below is guarded. Storage can be disabled outright
+// (Safari private mode, third-party-cookie blocking) or throw on write when the
+// quota is full, and a throw during bootstrap would leave the user staring at a
+// blank page — so a failed read degrades to defaults and a failed write is lost
+// silently, keeping the session in memory.
 
 export function readState() {
   try {
