@@ -2064,6 +2064,7 @@ export function createEngine() {
   let current = null;
   let retryUsed = false;
   let endedAt = 0;
+  let suppressPause = false;
 
   const emit = (event, detail) => {
     const set = listeners.get(event);
@@ -2082,7 +2083,7 @@ export function createEngine() {
 
   el.addEventListener('play', () => emit('play', current));
   el.addEventListener('pause', () => {
-    if (el.ended) return;
+    if (suppressPause) return;
     emit('pause', current);
   });
 
@@ -2094,6 +2095,14 @@ export function createEngine() {
     const now = Date.now();
     if (now - endedAt < ENDED_GUARD_MS) return;
     endedAt = now;
+    // Browsers fire `ended` and then QUEUE a separate `pause` task. A listener
+    // that auto-advances runs synchronously inside this dispatch, and the
+    // src=/load() it performs resets el.ended to false before that queued pause
+    // arrives — so reading el.ended in the pause handler would let the pause
+    // through and report the freshly-started track as paused. A local flag,
+    // cleared by play() and by the next macrotask as a backstop, survives it.
+    suppressPause = true;
+    setTimeout(() => { suppressPause = false; }, 0);
     emit('ended', current);
   });
 
@@ -2115,16 +2124,22 @@ export function createEngine() {
   return {
     element: el,
 
-    async play(item) {
+async play(item) {
       const changing = !current || current.url !== item.url;
       current = { ...item, loading: true };
+      suppressPause = false;
       emit('track', current);
 
       if (changing) {
+        // Re-arms the one-retry budget: without this, a single failed URL would
+        // disable retry for the rest of the session.
         retryUsed = false;
         el.src = item.url;
         el.load();
       }
+      // Emitted here rather than left to the browser's loadstart, so a
+      // same-URL resume still reports loading to a subscriber.
+      setLoading(true);
 
       try {
         await el.play();
@@ -2136,19 +2151,20 @@ export function createEngine() {
 
     pause() { el.pause(); },
 
-function toggle() {
-    // Declared as a standalone function calling `play` directly, never as an
-    // inline `this.play(...)`: callers hold the engine as a destructured
-    // binding (`const { toggle } = engine`), where `this` is undefined.
-    if (el.paused) {
-      if (current) play(current);
-    } else {
-      el.pause();
-    }
-  }
+    // A standalone function calling `play` directly, never an inline
+    // `this.play(...)`: callers hold the engine's methods as destructured
+    // bindings (`const { toggle } = engine`), where `this` is undefined.
+    toggle() {
+      if (el.paused) {
+        if (current) play(current);
+      } else {
+        el.pause();
+      }
+    },
 
     seekBy(delta) {
       if (!current || current.seekable === false) return;
+      if (!Number.isFinite(delta)) return;
       const max = Number.isFinite(el.duration) ? el.duration : Infinity;
       el.currentTime = Math.min(Math.max(el.currentTime + delta, 0), max);
     },
@@ -2170,11 +2186,13 @@ function toggle() {
     },
 
     destroy() {
+      // Listeners cleared BEFORE el.pause(): pausing emits `pause`, so the
+      // other order would run every registered handler during teardown.
+      listeners.clear();
       el.pause();
       el.removeAttribute('src');
       el.load();
       el.remove();
-      listeners.clear();
     },
   };
 }
@@ -2302,8 +2320,10 @@ export function createMediaSession(handlers) {
   set('play', handlers.onPlay);
   set('pause', handlers.onPause);
   set('stop', handlers.onStop);
-  set('seekbackward', (e) => handlers.onSeekBy(-(e?.seekOffset || 10)));
-  set('seekforward', (e) => handlers.onSeekBy(e?.seekOffset || 10));
+  // `?? 10`, not `|| 10`: an explicit seekOffset of 0 is a real offset, and
+  // `||` would silently turn it into 10.
+  set('seekbackward', (e) => handlers.onSeekBy(-(e?.seekOffset ?? 10)));
+  set('seekforward', (e) => handlers.onSeekBy(e?.seekOffset ?? 10));
   set('previoustrack', handlers.onPrev);
   set('nexttrack', handlers.onNext);
 
@@ -2335,7 +2355,10 @@ export function createMediaSession(handlers) {
       try {
         ms.setPositionState({
           duration,
-          position: Math.min(currentTime, duration),
+          // Both ends clamped: Chrome throws a TypeError on a negative
+          // position, and the catch would swallow it, leaving the lock-screen
+          // position silently stale.
+          position: Math.min(Math.max(currentTime, 0), duration),
           playbackRate: rate,
         });
       } catch {
@@ -2361,10 +2384,14 @@ import { createMediaSession } from './audio/mediaSession.js';
 
 const engine = createEngine();
 const session = createMediaSession({
-  onPlay: () => engine.play(engine.getCurrent()),
+  // getCurrent() is null before anything has played; calling play() with it
+  // would throw on `item.url`.
+  onPlay: () => { const c = engine.getCurrent(); if (c) engine.play(c); },
   onPause: () => engine.pause(),
   onStop: () => engine.pause(),
   onSeekBy: (d) => engine.seekBy(d),
+  // Wired to nothing yet: Task 6 attaches the queue. The device gate expects
+  // these lock-screen buttons to be inert, not to advance the queue.
   onNext: () => document.dispatchEvent(new CustomEvent('quran:next')),
   onPrev: () => document.dispatchEvent(new CustomEvent('quran:prev')),
 });
