@@ -16,6 +16,13 @@ export function createRecitersView({ root, store, onSelectMoshaf }) {
   const grid = h('div', { class: 'grid grid-reciters' });
   root.append(grid);
 
+  // `getReciters` maps `(r.moshaf || [])`, so a live payload always yields an
+  // array. The guards below are for the OTHER route into this view's state: the
+  // 24h cache, which is hand-editable and outlives any payload. A `moshaf: null`
+  // there throws inside render(), the store catches and logs it, and the grid
+  // stays permanently empty with nothing on screen to explain why.
+  const moshafsOf = (r) => (Array.isArray(r.moshaf) ? r.moshaf : []);
+
   // 241 reciters share 287 moshafs, so one riwaya is the common case and Arabic
   // needs the singular and the plural distinguished. Real counts are 114, 38 and
   // a few dozen smaller sets — all above 10, where Arabic takes the singular
@@ -30,7 +37,7 @@ export function createRecitersView({ root, store, onSelectMoshaf }) {
    * `surah_total` absent from the payload must not read as "0 سورة".
    */
   function surahRange(r) {
-    const counts = [...new Set(r.moshaf.map((m) => Number(m.surahTotal) || 0))]
+    const counts = [...new Set(moshafsOf(r).map((m) => Number(m.surahTotal) || 0))]
       .filter((n) => n > 0)
       .sort((a, b) => a - b);
     if (counts.length === 0) return '';
@@ -39,7 +46,7 @@ export function createRecitersView({ root, store, onSelectMoshaf }) {
   }
 
   function head(r, open) {
-    const meta = [riwayaCount(r.moshaf.length)];
+    const meta = [riwayaCount(moshafsOf(r).length)];
     const range = surahRange(r);
     if (range) meta.push(range);
 
@@ -62,10 +69,11 @@ export function createRecitersView({ root, store, onSelectMoshaf }) {
   }
 
   function riwayaList(r, selectedMoshafId) {
-    if (r.moshaf.length === 0) {
+    const moshafs = moshafsOf(r);
+    if (moshafs.length === 0) {
       return h('p', { class: 'empty' }, 'لا روايات متاحة لهذا القارئ');
     }
-    return h('div', { class: 'riwaya-list' }, r.moshaf.map((m) => {
+    return h('div', { class: 'riwaya-list' }, moshafs.map((m) => {
       const on = m.id === selectedMoshafId;
       return h('button', {
         class: `riwaya${on ? ' is-on' : ''}`,
@@ -82,15 +90,45 @@ export function createRecitersView({ root, store, onSelectMoshaf }) {
     }));
   }
 
-  function render() {
+  /**
+ * Ids of the surahs whose names match the query. A reader matches on any surah
+ * one of its riwayas can actually recite, so typing "الكهف" on this tab surfaces
+ * the readers who have it. Without it the ONE search box could not span both
+ * halves of the app: the reciters view never looked at surah names, so a user
+ * looking for the reader of a surah they already knew got nothing, while the
+ * surahs tab had 114 names to match against.
+ *
+ * A Set, because this runs per reader over a 114-entry surah_list, and the
+ * matching ids are recomputed for every reciter otherwise.
+ */
+function matchingSurahIds(suwarById, query) {
+  const ids = new Set();
+  for (const [id, meta] of suwarById) {
+    if (matchesAll(meta?.name || '', query)) ids.add(id);
+  }
+  return ids;
+}
+
+function canRecite(moshafs, surahIds) {
+  return moshafs.some((m) => (m.surahList ?? []).some((id) => surahIds.has(id)));
+}
+
+function render() {
     const s = store.getState();
-    // One box searches both, but each view filters its own data. A reciter also
-    // matches on any of its riwaya names, so "حفص" finds a reciter whose own
-    // name does not contain the riwaya.
+    // One box, one query, four views — and each view filters its own data. A
+    // reciter matches on its own name, on any of its riwaya names, and on any
+    // surah it can recite, so "حفص" finds a reader whose name does not contain
+    // the riwaya and "الكهف" finds the readers who have that surah.
     const list = s.query
-      ? s.reciters.filter((r) =>
-          matchesAll(r.name, s.query) ||
-          r.moshaf.some((m) => matchesAll(m.name, s.query)))
+      ? (() => {
+          const surahIds = matchingSurahIds(s.suwarById, s.query);
+          return s.reciters.filter((r) => {
+            const moshafs = moshafsOf(r);
+            return matchesAll(r.name, s.query) ||
+              moshafs.some((m) => matchesAll(m.name, s.query)) ||
+              canRecite(moshafs, surahIds);
+          });
+        })()
       : s.reciters;
 
     if (list.length === 0) {
@@ -100,8 +138,9 @@ export function createRecitersView({ root, store, onSelectMoshaf }) {
     }
 
     const nodes = list.map((r) => {
+      const moshafs = moshafsOf(r);
       const open = s.expandedReciterId === r.id;
-      const chosen = r.moshaf.some((m) => m.id === s.selectedMoshafId);
+      const chosen = moshafs.some((m) => m.id === s.selectedMoshafId);
       const card = h('div', {
         class: `card reciter${chosen ? ' is-selected' : ''}${open ? ' is-open' : ''}`,
       }, head(r, open));
@@ -116,8 +155,11 @@ export function createRecitersView({ root, store, onSelectMoshaf }) {
   // `selectedMoshaf`: the cards compare against raw moshaf ids, and the resolved
   // object is a fresh reference on every background refresh — keying on it would
   // re-render 241 cards each time the reciters payload is refetched.
+  // `suwarById` is here because the surah matching above needs the names: without
+  // it a query typed before the suwar payload landed would keep its incomplete
+  // result set for the rest of the session.
   const unsubscribe = store.subscribe((_s, keys) => {
-    if (keys.has('reciters') || keys.has('query') ||
+    if (keys.has('reciters') || keys.has('query') || keys.has('suwarById') ||
         keys.has('selectedMoshafId') || keys.has('expandedReciterId')) render();
   }, { immediate: true });
 

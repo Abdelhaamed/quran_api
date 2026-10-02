@@ -1,9 +1,24 @@
 import { h, frag } from '../utils/dom.js';
 import { sortForPlayback } from '../utils/favorites.js';
+import { matchesAll } from '../utils/arabic.js';
 
 const HEART_ON = '\u2665';
 
 const EMPTY_COPY = 'لا توجد سور في المفضلة. اضغط القلب في تبويب «السور» لحفظ سورة بصوت قارئها.';
+
+const NO_MATCH = 'لا نتائج مطابقة';
+
+/**
+ * Matches on everything the card actually shows: the surah, the reader and the
+ * riwaya. The riwaya is included because it shares the meta line — a query that
+ * matches half the text a user can see, and not the other half, reads as the box
+ * having missed.
+ */
+function matches(fav, query) {
+  return matchesAll(fav.surahName, query) ||
+    matchesAll(fav.reciterName || '', query) ||
+    matchesAll(fav.riwayaName || '', query);
+}
 
 export function createFavoritesView({ root, store, onPlay, onRemove, onPlayAll, onBrowse }) {
   const head = h('div', { class: 'fav-head' });
@@ -34,7 +49,19 @@ export function createFavoritesView({ root, store, onPlay, onRemove, onPlayAll, 
 
     // sortForPlayback orders by surah then reciter, and total by the pair, so
     // play-all walks the queue in the order it is shown here.
-    const nodes = sortForPlayback(favs).map((f) => {
+    const ordered = sortForPlayback(favs);
+    // The head keeps counting and offering play-all over the WHOLE list, not the
+    // filtered one: play-all is a queue of everything, and a count of what a
+    // search happened to match would describe nothing the user can act on.
+    const shown = s.query ? ordered.filter((f) => matches(f, s.query)) : ordered;
+
+    if (shown.length === 0) {
+      head.replaceChildren();
+      list.replaceChildren(h('p', { class: 'empty' }, NO_MATCH));
+      return;
+    }
+
+    const nodes = shown.map((f) => {
       const on = s.playback?.kind === 'surah' &&
         s.playback.surahId === f.surahId && s.playback.moshafId === f.moshafId;
 
@@ -60,7 +87,10 @@ export function createFavoritesView({ root, store, onPlay, onRemove, onPlayAll, 
   }
 
   const unsubscribe = store.subscribe((_s, keys) => {
-    if (keys.has('favorites') || keys.has('playback')) render();
+    // `query` was missing here, which is what made the search box look broken on
+    // this tab: typing set the query and nothing redrew, because the gate never
+    // fired. A control that appears to do nothing is worse than no control.
+    if (keys.has('favorites') || keys.has('playback') || keys.has('query')) render();
   }, { immediate: true });
 
   return { render, destroy: unsubscribe };

@@ -24,6 +24,11 @@ import { h, qs } from './utils/dom.js';
 
 const UNAVAILABLE = 'هذه السورة غير متوفرة لهذا القارئ';
 const GONE = 'القارئ لم يعد متوفراً';
+// Distinct from GONE: the reciter is still listed, there is simply nothing saved
+// to play. Saying the reader is gone when the favorites list is simply empty
+// sends the user looking for a problem in the wrong place.
+const UNPLAYABLE = 'لا يمكن التشغيل — لا يوجد رابط محفوظ لهذه السورة';
+const NOTHING_SAVED = 'لا توجد سور في المفضلة';
 const LOAD_FAILED = 'تعذّر تحميل السورة';
 const PLAY_FAILED = 'تعذّر تحميل السورة. تحقّق من الاتصال.';
 const BLOCKED = 'اضغط تشغيل للسماح بالصوت';
@@ -87,6 +92,10 @@ const moshafOf = (id) => moshafIndex.get(id) || null;
  * reciters. Station ids, surah ids and moshaf-backed surah ids share one number
  * space, so `setIndexBySurah` alone cannot tell whose list it found — which is
  * why every hand-off records the owner here.
+ *
+ * `length` is only meaningful for kind 'favorites': one favorite played on its
+ * own is a queue of exactly one, which is a different thing from a play-all run
+ * that has reached its end, and advance() has to tell them apart.
  */
 let queueBinding = null;
 
@@ -203,7 +212,13 @@ function playQueueItem(item) {
       playback: {
         kind: 'surah', surahId: fav.surahId, moshafId: fav.moshafId, url: item.url,
         title: fav.surahName, reciterName: fav.reciterName, riwayaName: fav.riwayaName,
-        isPlaying: true, isFavorite: true, seekable: true, error: null,
+        // Read from the store, never assumed. A favorites queue is a snapshot
+        // taken when it was built, and the user can delete a still-queued entry
+        // from the favorites tab before the queue reaches it — so a hard-coded
+        // true lights the player's heart over a track they just un-favorited.
+        isPlaying: true,
+        isFavorite: isFavorite(store.getState().favorites, fav.surahId, fav.moshafId),
+        seekable: true, error: null,
       },
     });
     engine.play({
@@ -244,17 +259,34 @@ function playRadio(radio) {
   });
 }
 
-/** Plays a saved favorite, switching the session to that reciter's own playlist. */
+/**
+ * Plays a saved favorite on its own, and moves the session to that reciter.
+ *
+ * Deliberately NOT routed through playSurah: that requires the surah to be in the
+ * moshaf's CURRENT surah_list, which a favorite saved against an older list does
+ * not have to be — the API's list shrinks between releases and caches predate it.
+ * Routing it there made one tap refuse a track that "تشغيل الكل" happily played,
+ * from the same entry, in the same session. Both now build the same item and go
+ * through the same playQueueItem, so there is one rule and not two.
+ */
 function playFavorite(fav) {
-  const moshaf = moshafOf(fav.moshafId);
-  if (!moshaf) {
+  if (!moshafOf(fav.moshafId)) {
     showToast(GONE);
     return;
   }
+  const url = favoriteUrl(fav);
+  if (!url) {
+    showToast(UNPLAYABLE);
+    return;
+  }
+
   store.setState({ selectedMoshafId: fav.moshafId });
   writeState({ selectedMoshafId: fav.moshafId });
   resolveMoshaf();
-  playSurah(fav.surahId);
+
+  queue.setPlaylist([{ surahId: fav.surahId, title: fav.surahName, url, fav }]);
+  queueBinding = { kind: 'favorites', length: 1 };
+  playQueueItem(queue.current);
 }
 
 /**
@@ -269,11 +301,18 @@ function favoriteUrl(fav) {
 }
 
 function playAllFavorites() {
-  const ordered = sortForPlayback(store.getState().favorites)
+  const favs = store.getState().favorites;
+  // Checked before the queue is built, so an empty list says so plainly instead
+  // of blaming the readers.
+  if (favs.length === 0) {
+    showToast(NOTHING_SAVED, { ms: 2600 });
+    return;
+  }
+  const ordered = sortForPlayback(favs)
     .map((fav) => ({ fav, url: favoriteUrl(fav) }))
     .filter((entry) => entry.url);
   if (ordered.length === 0) {
-    showToast('لا يمكن تشغيل المفضلة — القارئ لم يعد متوفراً', { ms: 2600 });
+    showToast(UNPLAYABLE, { ms: 2600 });
     return;
   }
 
@@ -282,7 +321,7 @@ function playAllFavorites() {
   queue.setPlaylist(ordered.map(({ fav, url }) => ({
     surahId: fav.surahId, title: fav.surahName, url, fav,
   })));
-  queueBinding = { kind: 'favorites' };
+  queueBinding = { kind: 'favorites', length: ordered.length };
   playQueueItem(queue.current);
 }
 
@@ -294,6 +333,20 @@ function advance() {
   }
   const nextItem = queue.next();
   if (!nextItem) {
+    // One favorite played on its own is a queue of exactly one, so reaching its
+    // end is not the end of anything the user asked for: fall back to the
+    // selected reciter's own playlist so "next" keeps going, as it did before
+    // playFavorite stopped sharing playSurah's queue. Gated on length === 1 so a
+    // play-all run that has genuinely finished, and a recitation that has reached
+    // the end of the moshaf's surah_list, still stop.
+    if (queueBinding?.kind === 'favorites' && queueBinding.length === 1) {
+      bindMoshafQueue({ force: true });
+      const carried = queue.current;
+      if (carried && carried.surahId !== s.playback?.surahId) {
+        playQueueItem(carried);
+        return;
+      }
+    }
     // End of the queue: the player keeps the last track's title and shows it
     // paused, rather than blanking to a state with no track in it.
     if (s.playback) store.setState({ playback: { ...s.playback, isPlaying: false } });
@@ -447,10 +500,15 @@ engine.on('blocked', () => {
 addEventListener('online', () => store.setState({ offline: false }));
 addEventListener('offline', () => store.setState({ offline: true }));
 
-// Persisted from here rather than from the view, so the write lives with the
-// other ones. Without it the store's restore of expandedReciterId would have
-// nothing ever writing the key back.
+// Both written from here rather than at each call site: a tab change and an
+// expansion each reach the store from more than one place — a tab button, a riwaya
+// tap, the surah header's change button — and shell.js only knows about its own
+// tab buttons. Without this, picking a riwaya then reloading lands on القرّاء
+// with the reader the user had just chosen sitting there collapsed. shell.js
+// still writes activeTab on a click, which is the same key with the same value:
+// writeState merges, so the duplicate write is idempotent.
 store.subscribe((s, keys) => {
+  if (keys.has('activeTab')) writeState({ activeTab: s.activeTab });
   if (keys.has('expandedReciterId')) writeState({ expandedReciterId: s.expandedReciterId });
 });
 

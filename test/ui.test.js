@@ -325,11 +325,39 @@ describe('createShell', () => {
     expect(qs('#banner').hidden).toBe(true);
   });
 
-  it('re-renders nothing on a state change that touches no rendered key', async () => {
-    const before = qs('#banner').textContent;
-    store.setState({ reciters: RECITERS });
-    await flush();
-    expect(qs('#banner').textContent).toBe(before);
+  it('repaints the banner only for the keys it draws', async () => {
+    // The previous version of this test compared `#banner` text across an
+    // unrelated state change, and that text is identical under any
+    // implementation — it could not fail. Now the banner's textContent SETTER is
+    // observed, so a shell that repainted on every state change is caught by the
+    // write it should not have made.
+    const banner = qs('#banner');
+    const writes = [];
+    let held = banner.textContent;
+    Object.defineProperty(banner, 'textContent', {
+      configurable: true,
+      get() { return held; },
+      set(value) { writes.push(value); held = value; },
+    });
+    try {
+      store.setState({ offline: true });
+      await flush();
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toBe('لا يوجد اتصال — تتصفّح البيانات المحفوظة');
+      expect(banner.hidden).toBe(false);
+
+      store.setState({ reciters: RECITERS });
+      await flush();
+      store.setState({ playback: null });
+      await flush();
+      store.setState({ favorites: [] });
+      await flush();
+      expect(writes).toHaveLength(1);
+    } finally {
+      // Deleting the own property is the whole restore: textContent is inherited
+      // from further up the prototype chain, and the shell's next write goes there.
+      delete banner.textContent;
+    }
   });
 });
 
@@ -380,13 +408,27 @@ describe('createSearch', () => {
     expect(qs('#search').value).toBe('');
   });
 
-  it('clears the query and the box together when the tab changes', async () => {
+  it('carries the query across a tab change instead of clearing it', async () => {
+    // Clearing on every tab switch made the box per-tab, which is not what
+    // "unified" means: the same query has to reach all four views. The surahs
+    // tab inherits the reader's query and the favorites tab its own filter.
     const store = storeWith({ query: 'الكهف' });
     createSearch({ store });
     expect(qs('#search').value).toBe('الكهف');
     store.setState({ activeTab: 'radio' });
     await flush();
-    expect(store.getState().query).toBe('');
+    expect(store.getState().query).toBe('الكهف');
+    expect(qs('#search').value).toBe('الكهف');
+    store.setState({ activeTab: 'surahs' });
+    await flush();
+    expect(qs('#search').value).toBe('الكهف');
+  });
+
+  it('still follows a programmatic clear out of the box', async () => {
+    const store = storeWith({ query: 'الكهف' });
+    createSearch({ store });
+    store.setState({ query: '' });
+    await flush();
     expect(qs('#search').value).toBe('');
   });
 
@@ -409,7 +451,14 @@ describe('createRecitersView', () => {
   const build = (over = {}) => {
     const root = document.createElement('section');
     document.body.replaceChildren(root);
-    const store = storeWith({ reciters: RECITERS, ...over });
+    // suwarById is populated because the reciters view matches a surah one of a
+    // reader's riwayas can recite — with an empty map that half of the search
+    // silently does nothing and every test here still passes.
+    const store = storeWith({
+      suwarById: new Map(SUWAR.map((s) => [s.id, s])),
+      reciters: RECITERS,
+      ...over,
+    });
     const onSelectMoshaf = vi.fn();
     const view = createRecitersView({ root, store, onSelectMoshaf });
     return { root, store, onSelectMoshaf, view };
@@ -538,9 +587,52 @@ describe('createRecitersView', () => {
     expect(qsa('.chip', root)).toHaveLength(0);
   });
 
-  it('matches a reciter on a riwaya its name does not contain', () => {
-    const { root } = build({ query: 'ورش' });
+  it('matches a reciter on a riwaya its own name does not contain', () => {
+    const { root } = build({
+      reciters: [reciter(1, 'قارئ بلا اسمMatches', moshaf(11, { name: 'رواية ورش عن نافع' }))],
+      query: 'ورش',
+    });
+    expect(qsa('.reciter-name', root).map((n) => n.textContent))
+      .toEqual(['قارئ بلا اسمMatches']);
+  });
+
+  it('matches a reciter on a surah one of its riwayas can recite', () => {
+    // The half of the unified search that did not exist: the reciters view never
+    // looked at surah names, so "الكهف" — a surah, not a reader — found nothing.
+    // Reciter 3's first riwaya carries 18; the others do not carry it at all.
+    const { root } = build({ query: 'الكهف' });
+    expect(qsa('.reciter-name', root).map((n) => n.textContent)).toEqual(['ياسر الدوسري']);
+    // A second riwaya of the SAME reader counts too, so the hit is on the
+    // reader rather than on one of its riwayas.
+    expect(qsa('.reciter', root)).toHaveLength(1);
+  });
+
+  it('does not match a reciter for a surah none of its riwayas has', () => {
+    const { root } = build({
+      reciters: [reciter(1, 'قارئ', moshaf(11, { surahList: [1, 2, 3] }))],
+      query: 'الكهف',
+    });
     expect(qsa('.reciter', root)).toHaveLength(0);
+  });
+
+  it('survives a cached reciter whose moshaf is null', () => {
+    // Only reachable through the hand-editable 24h cache, but `render` throwing
+    // there left the grid permanently empty with nothing on screen to say why.
+    const { root } = build({
+      reciters: [
+        { id: 7, name: 'قارئ بلا روايات', letter: '', moshaf: null },
+        reciter(1, 'سليم', moshaf(11)),
+      ],
+    });
+    expect(qsa('.reciter-name', root).map((n) => n.textContent)).toEqual(['قارئ بلا روايات', 'سليم']);
+    expect(qs('.reciter-meta', root).textContent).toBe('بلا روايات');
+  });
+
+  it('shows a cached reciter with a null moshaf as having none when expanded', async () => {
+    const { root } = build({ reciters: [{ id: 7, name: 'قارئ بلا روايات', letter: '', moshaf: null }] });
+    qsa('.reciter-head', root)[0].click();
+    await flush();
+    expect(qs('.empty', root).textContent).toBe('لا روايات متاحة لهذا القارئ');
   });
 
   it('normalizes both sides of the comparison', () => {
@@ -796,9 +888,13 @@ describe('createSurahsView', () => {
 // ---------------------------------------------------------------------------
 
 describe('createFavoritesView', () => {
+  // Distinct names AND distinct ids, because the old fixture gave every non-1 surah
+  // the same name: two entries then rendered identically whatever the order, so
+  // replacing sortForPlayback with `[...favs]` left the whole suite green.
+  const NAMES = { 1: 'الفاتحة', 2: 'البقرة', 18: 'الكهف' };
   const fav = (surahId, moshafId, over = {}) => ({
     surahId, moshafId,
-    surahName: surahId === 1 ? 'الفاتحة' : 'الكهف',
+    surahName: NAMES[surahId],
     reciterName: moshafId === 11 ? 'أحمد العكش' : 'محمود خليل الحصري',
     riwayaName: 'رواية حفص عن عاصم',
     server: `https://server${moshafId}.example/`,
@@ -829,13 +925,24 @@ describe('createFavoritesView', () => {
   });
 
   it('lists entries ordered for playback, naming the reciter and the riwaya', () => {
-    // The same surah under two reciters is a supported shape, so the moshaf id
-    // has to break the tie or the order falls to sort stability.
-    const { root } = build({ favorites: [fav(18, 11), fav(1, 22), fav(1, 11)] });
-    expect(qsa('.fav', root)).toHaveLength(3);
-    expect(qs('.fav-count', root).textContent).toBe('3 سورة');
-    expect(qs('.reciter-meta', root).textContent)
-      .toBe('أحمد العكش · رواية حفص عن عاصم');
+    // The order is the assertion, and it has to be readable from the DOM: this
+    // was three entries whose rendered text barely differed, so it passed under
+    // any sort. Both the surah number (in .surah-place) and the name must come out
+    // sorted, or the queue built by play-all would not match the list above it.
+    const { root } = build({ favorites: [fav(18, 11), fav(1, 22), fav(2, 11), fav(1, 11)] });
+    expect(qsa('.fav', root)).toHaveLength(4);
+    expect(qsa('.surah-place', root).map((n) => n.textContent)).toEqual(['1', '1', '2', '18']);
+    expect(qsa('.surah-name', root).map((n) => n.textContent))
+      .toEqual(['الفاتحة', 'الفاتحة', 'البقرة', 'الكهف']);
+    expect(qs('.fav-count', root).textContent).toBe('4 سورة');
+    // The two surah-1 entries differ only by reciter, which is the tie-break the
+    // order exists to make deterministic.
+    expect(qsa('.reciter-meta', root).map((n) => n.textContent)).toEqual([
+      'أحمد العكش · رواية حفص عن عاصم',
+      'محمود خليل الحصري · رواية حفص عن عاصم',
+      'أحمد العكش · رواية حفص عن عاصم',
+      'أحمد العكش · رواية حفص عن عاصم',
+    ]);
   });
 
   it('plays and removes through separate controls', () => {
@@ -845,6 +952,45 @@ describe('createFavoritesView', () => {
     expect(onPlay).not.toHaveBeenCalled();
     qs('.fav-open', root).click();
     expect(onPlay).toHaveBeenCalledWith(fav(1, 11));
+    qs('.btn-primary', root).click();
+    expect(onPlayAll).toHaveBeenCalled();
+  });
+
+  it('filters the list by the one search box, on surah, reciter and riwaya', async () => {
+    // `query` was missing from this view's subscribe gate, so typing set the query
+    // and moved nothing: the control looked broken on this tab.
+    const { root, store } = build({
+      favorites: [fav(1, 11), fav(2, 11), fav(18, 22)],
+    });
+    expect(qsa('.fav', root)).toHaveLength(3);
+
+    store.setState({ query: 'الحصري' });
+    await flush();
+    expect(qsa('.fav', root)).toHaveLength(1);
+    expect(qs('.surah-name', root).textContent).toBe('الكهف');
+
+    store.setState({ query: 'الفاتحة' });
+    await flush();
+    expect(qsa('.surah-name', root).map((n) => n.textContent)).toEqual(['الفاتحة']);
+
+    store.setState({ query: 'ورش' });
+    await flush();
+    expect(qsa('.fav', root)).toHaveLength(0);
+    expect(qs('.empty', root).textContent).toBe('لا نتائج مطابقة');
+
+    store.setState({ query: 'فاتحة' });
+    await flush();
+    expect(qsa('.fav', root)).toHaveLength(1);
+  });
+
+  it('keeps the head counting the whole list, not the search matches', async () => {
+    // play-all builds a queue of everything, so a count of what a search matched
+    // would describe nothing the user can act on.
+    const { root, store, onPlayAll } = build({ favorites: [fav(1, 11), fav(2, 11), fav(18, 11)] });
+    store.setState({ query: 'الفاتحة' });
+    await flush();
+    expect(qsa('.fav', root)).toHaveLength(1);
+    expect(qs('.fav-count', root).textContent).toBe('3 سورة');
     qs('.btn-primary', root).click();
     expect(onPlayAll).toHaveBeenCalled();
   });
@@ -961,6 +1107,13 @@ describe('app wiring', () => {
   let app = null;
 
   beforeEach(() => {
+    // Without this, state leaked between these tests: `expandedReciterId` and
+    // `selectedMoshafId` are persisted, so a later boot inherited the tab and the
+    // expansion an earlier one chose. The explicit setItem calls in the tests
+    // below run AFTER this, so a test that needs storage keeps what it writes —
+    // and if one ever stops working because of this, that is the leak being
+    // surfaced, not a reason to drop the clear.
+    localStorage.clear();
     api.reciters = RECITERS;
     api.suwar = SUWAR;
     api.radios = RADIOS;
@@ -1112,6 +1265,29 @@ describe('app wiring', () => {
     app = await boot({ keepStorage: true });
     expect(app.store.getState().expandedReciterId).toBe(3);
     expect(qs('.reciter.is-open .reciter-name').textContent).toBe('ياسر الدوسري');
+  });
+
+  it('remembers the tab a riwaya tap opened, not just the one a tab button opens', async () => {
+    // Both tabs come from code as well as from the tab bar: picking a riwaya
+    // opens the surahs, and the surah header's change button opens the readers.
+    // Only shell.js knew about its own buttons, so a riwaya tap then a reload
+    // landed back on القرّاء with the chosen reader collapsed.
+    app = await boot();
+    await chooseMoshaf({ index: 2, riwaya: 1 });
+    expect(JSON.parse(localStorage.getItem('quran.state.v2')).activeTab).toBe('surahs');
+    app.player.destroy();
+    app = null;
+
+    app = await boot({ keepStorage: true });
+    expect(app.store.getState().activeTab).toBe('surahs');
+    expect(app.store.getState().selectedMoshafId).toBe(32);
+    expect(app.store.getState().expandedReciterId).toBe(3);
+    expect(qsa('#view-surahs .surah')).toHaveLength(1);
+
+    // And the other code-driven direction.
+    qs('#view-surahs .btn-ghost').click();
+    await flush();
+    expect(JSON.parse(localStorage.getItem('quran.state.v2')).activeTab).toBe('reciters');
   });
 
   it('never nests one button inside another, in any view, in any state', async () => {
@@ -1418,6 +1594,28 @@ describe('app wiring', () => {
     expect(app.store.getState().selectedMoshafId).toBe(22);
   });
 
+  it('plays a saved favorite whose surah the reciter no longer lists', async () => {
+    // The disagreement this replaces: playFavorite routed through playSurah,
+    // which requires the surah to be in the moshaf's CURRENT surah_list. A
+    // favorite saved against an older list — the API shrinks surah_list between
+    // releases and caches predate it — refused on a single tap while تشغيل الكل
+    // played the very same entry from its saved URL.
+    app = await bootWithReciter();
+    app.toggleSurah(18, 11);
+    await flush();
+    expect(app.store.getState().favorites[0].surahId).toBe(18);
+    // 18 is in the global suwar list but NOT in moshaf 11's surah_list.
+    expect(app.moshafOf(11).surahList).not.toContain(18);
+
+    app.playFavorite(app.store.getState().favorites[0]);
+    await flush();
+    const p = app.store.getState().playback;
+    expect(p.error).toBe(null);
+    expect(p.isPlaying).toBe(true);
+    expect(p.url).toBe('https://server11.example/018.mp3');
+    expect(app.engine.element.getAttribute('src')).toBe('https://server11.example/018.mp3');
+  });
+
   it('refuses a favorite whose reciter is gone, and says so', async () => {
     app = await bootWithReciter();
     app.toggleSurah(1, 404);
@@ -1426,6 +1624,142 @@ describe('app wiring', () => {
     expect(qs('#toast').hidden).toBe(false);
     expect(qs('#toast').textContent).toBe('القارئ لم يعد متوفراً');
     expect(app.store.getState().playback).toBe(null);
+  });
+
+  it('refuses a favorite with no usable server, on either path', async () => {
+    // A favorite whose reciter is gone has no server to build a URL from. The
+    // copy is about the missing link, NOT about the reader being gone: the
+    // reader being gone is its own message above.
+    app = await boot();
+    app.store.setState({
+      favorites: [{
+        surahId: 1, moshafId: 404, surahName: 'الفاتحة',
+        reciterName: 'قارئ رحل', riwayaName: '', server: '', addedAt: 1,
+      }],
+    });
+    await flush();
+
+    app.playAllFavorites();
+    expect(qs('#toast').textContent).toBe('لا يمكن التشغيل — لا يوجد رابط محفوظ لهذه السورة');
+    expect(app.store.getState().playback).toBe(null);
+  });
+
+  it('says plainly that there is nothing saved, rather than blaming a reader', async () => {
+    // The old copy fired for an empty favorites list too, which sent the user
+    // looking for a missing reciter that was there all along.
+    app = await boot();
+    app.playAllFavorites();
+    expect(qs('#toast').hidden).toBe(false);
+    expect(qs('#toast').textContent).toBe('لا توجد سور في المفضلة');
+    expect(app.store.getState().playback).toBe(null);
+  });
+
+  it('resolves a legacy server-less favorite from the live moshaf index', async () => {
+    // favoriteUrl falls back to moshafOf(fav.moshafId)?.server for a favorite
+    // saved before its moshaf was known. That branch is reachable and correct,
+    // and nothing pinned it: surahUrl('') would have produced the relative path
+    // "001.mp3", which resolves against the app's own origin and 404s.
+    app = await boot();
+    app.store.setState({
+      favorites: [{
+        surahId: 1, moshafId: 11, surahName: 'الفاتحة',
+        reciterName: 'أحمد العكش', riwayaName: 'رواية حفص عن عاصم',
+        server: '', addedAt: 1,
+      }],
+    });
+    await flush();
+    app.playAllFavorites();
+    await flush();
+    expect(app.store.getState().playback.url).toBe('https://server11.example/001.mp3');
+    expect(app.engine.element.getAttribute('src')).toBe('https://server11.example/001.mp3');
+
+    // And through the single-favorite path, which builds the same item.
+    app.store.setState({ playback: null });
+    app.playFavorite(app.store.getState().favorites[0]);
+    await flush();
+    expect(app.store.getState().playback.url).toBe('https://server11.example/001.mp3');
+    expect(app.store.getState().playback.error).toBe(null);
+  });
+
+  it('follows a deleted favorite out of the player heart during play-all', async () => {
+    // The queue is a snapshot and is NOT re-filtered when a favorite is deleted —
+    // that is correct, the user asked for a run. But the heart claimed the
+    // still-queued track was favorited after they had just removed it.
+    app = await bootWithReciter();
+    app.toggleSurah(1, 11);
+    app.toggleSurah(2, 11);
+    await flush();
+    expect(app.store.getState().favorites).toHaveLength(2);
+
+    app.playAllFavorites();
+    await flush();
+    expect(app.store.getState().playback).toMatchObject({ surahId: 1, isFavorite: true });
+    expect(qs('#player .pl-heart').getAttribute('aria-pressed')).toBe('true');
+
+    // Delete surah 2 from the المفضلة tab while it is still queued.
+    qs('.tab[data-tab="favorites"]').click();
+    await flush();
+    qs('.fav:nth-child(2) .heart').click();
+    await flush();
+    expect(app.store.getState().favorites.map((f) => f.surahId)).toEqual([1]);
+
+    qs('.tab[data-tab="surahs"]').click();
+    app.advance();
+    await flush();
+    const p = app.store.getState().playback;
+    expect(p.surahId).toBe(2);
+    expect(p.isFavorite).toBe(false);
+    expect(qs('#player .pl-heart').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('keeps playing after one favorite runs out, by falling back to the reciter', async () => {
+    // playFavorite no longer shares the moshaf's queue, so it holds a queue of
+    // exactly one. Reaching its end is not the end of anything the user asked
+    // for, so "next" continues with the selected reciter's own surahs.
+    app = await bootWithReciter();
+    app.toggleSurah(18, 11);
+    await flush();
+    app.playFavorite(app.store.getState().favorites[0]);
+    await flush();
+    expect(app.store.getState().playback.surahId).toBe(18);
+
+    app.advance();
+    await flush();
+    const p = app.store.getState().playback;
+    expect(p.surahId).toBe(1);
+    expect(p.moshafId).toBe(11);
+    expect(p.url).toBe('https://server11.example/001.mp3');
+
+    // And a genuine end of recitation still stops: the fallback rebinds the
+    // moshaf queue, so surahs 2 and 3 come next and the one after that is the end.
+    app.advance();
+    await flush();
+    expect(app.store.getState().playback.surahId).toBe(2);
+    app.advance();
+    await flush();
+    expect(app.store.getState().playback.surahId).toBe(3);
+    app.advance();
+    await flush();
+    expect(app.store.getState().playback.isPlaying).toBe(false);
+  });
+
+  it('stops at the end of a play-all run instead of continuing', async () => {
+    // The counterpart to the fallback above: a run of more than one entry has
+    // reached its end, and must not spill into the selected reciter's playlist.
+    app = await bootWithReciter();
+    app.toggleSurah(1, 11);
+    app.toggleSurah(2, 11);
+    await flush();
+    app.playAllFavorites();
+    await flush();
+    app.advance();
+    await flush();
+    expect(app.store.getState().playback.surahId).toBe(2);
+
+    app.advance();
+    await flush();
+    expect(app.store.getState().playback.isPlaying).toBe(false);
+    expect(app.store.getState().playback.surahId).toBe(2);
   });
 
   it('plays favorites across reciters in playback order, one URL each', async () => {
@@ -1542,17 +1876,59 @@ describe('app wiring', () => {
     expect(qs('#banner').hidden).toBe(true);
   });
 
-  it('keeps the search box and the store in step when tabs change', async () => {
-    app = await boot();
+  it('keeps one query alive across tabs, and each view filters on it', async () => {
+    // The regression this replaced: the box cleared itself on every tab change,
+    // and the favorites view ignored `query` entirely, so on المفضلة the control
+    // set state and moved nothing.
+    app = await bootWithReciter();
+    app.toggleSurah(1, 11);
+    await flush();
     const input = qs('#search');
-    input.value = 'احمد';
+
+    input.value = 'الحصري';
     input.dispatchEvent(new window.Event('input'));
     await new Promise((r) => setTimeout(r, 200));
-    expect(qsa('#view-reciters .reciter')).toHaveLength(1);
+    expect(qsa('#view-reciters .reciter-name').map((n) => n.textContent))
+      .toEqual(['محمود خليل الحصري']);
 
+    // Same box, same query, now filtering the favorites by reciter name.
+    qs('.tab[data-tab="favorites"]').click();
+    await flush();
+    expect(input.value).toBe('الحصري');
+    expect(qsa('#view-favorites .fav')).toHaveLength(0);
+    expect(qs('#view-favorites .empty').textContent).toBe('لا نتائج مطابقة');
+
+    // And a query that matches a surah, on both halves of the app.
+    input.value = 'الفاتحة';
+    input.dispatchEvent(new window.Event('input'));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(qsa('#view-favorites .fav')).toHaveLength(1);
+    qs('.tab[data-tab="reciters"]').click();
+    await flush();
+    // Every reader's default fixture has surah 1, and "الكهف" is not in any of
+    // them, so the surah name has to be what decides this.
+    expect(qsa('#view-reciters .reciter')).toHaveLength(3);
+    input.value = 'الكهف';
+    input.dispatchEvent(new window.Event('input'));
+    await new Promise((r) => setTimeout(r, 200));
+    // Only reciter 3's first riwaya carries surah 18.
+    expect(qsa('#view-reciters .reciter-name').map((n) => n.textContent))
+      .toEqual(['ياسر الدوسري']);
+  });
+
+  it('leaves the box and the store alone when nothing sets the query', async () => {
+    app = await bootWithReciter();
+    const input = qs('#search');
+    input.value = 'الفاتحة';
+    input.dispatchEvent(new window.Event('input'));
+    await new Promise((r) => setTimeout(r, 200));
+
+    // A tab change must not disturb a query nobody touched, and the new view
+    // must honour it — both stations are filtered out by a surah name.
     qs('.tab[data-tab="radio"]').click();
     await flush();
-    expect(input.value).toBe('');
-    expect(app.store.getState().query).toBe('');
+    expect(app.store.getState().query).toBe('الفاتحة');
+    expect(input.value).toBe('الفاتحة');
+    expect(qsa('#view-radio .row')).toHaveLength(0);
   });
 });

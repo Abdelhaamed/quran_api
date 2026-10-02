@@ -19,17 +19,12 @@ export function createSearch({ store }) {
   input.value = store.getState().query;
 
   const unsubscribe = store.subscribe((s, keys) => {
-    // The box filters whichever view is on screen, so a query carried across a
-    // tab switch would sit over a list it does not describe. Both the store and
-    // the input are cleared together, so the two cannot disagree.
-    if (keys.has('activeTab') && s.query) {
-      store.setState({ query: '' });
-      input.value = '';
-      return;
-    }
-    // Gated on the key, and on no leading truthiness test: a `s.query &&`
-    // guard skips the empty case, so clearing the query programmatically would
-    // leave the old text in the box over an unfiltered list.
+    // The query SURVIVES a tab change, deliberately. One box filtering four views
+    // is only "unified" if the same query reaches all of them: clearing it on
+    // every switch meant the box answered for whichever tab happened to be open,
+    // and on المفضلة it was inert. Gated on the key, and on no leading truthiness
+    // test — a `s.query &&` guard skips the empty case, so clearing the query
+    // programmatically would leave the old text in the box over an unfiltered list.
     if (keys.has('query') && input.value.trim() !== s.query) {
       input.value = s.query;
     }
