@@ -1,8 +1,7 @@
 import { h, frag } from '../utils/dom.js';
 import { sortForPlayback } from '../utils/favorites.js';
 import { matchesAll } from '../utils/arabic.js';
-
-const HEART_ON = '\u2665';
+import { icon } from './icons.js';
 
 const EMPTY_COPY = 'لا توجد سور في المفضلة. اضغط القلب في تبويب «السور» لحفظ سورة بصوت قارئها.';
 
@@ -78,7 +77,7 @@ export function createFavoritesView({ root, store, onPlay, onRemove, onPlayAll, 
         type: 'button',
         'aria-label': 'إزالة من المفضلة',
         onclick: (e) => { e.stopPropagation(); onRemove(f); },
-      }, HEART_ON);
+      }, icon('heartOn'));
 
       return h('div', { class: `card fav${on ? ' is-playing' : ''}` }, open, heart);
     });

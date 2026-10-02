@@ -2,11 +2,7 @@ import { h, frag } from '../utils/dom.js';
 import { matchesAll } from '../utils/arabic.js';
 import { isFavorite } from '../utils/favorites.js';
 import { AYAH_COUNTS } from '../utils/ayah-counts.js';
-
-// Same code points as player.js's GLYPH.heart/heartOn, so the two hearts are
-// the same characters and the filled/empty state is legible in both places.
-const HEART_ON = '\u2665';
-const HEART_OFF = '\u2661';
+import { icon } from './icons.js';
 
 const NOT_PICKED = 'اختر قارئاً ثم روايته من تبويب «القرّاء»';
 
@@ -99,7 +95,7 @@ export function createSurahsView({ root, store, onPlay, onToggleFavorite, onChan
         'aria-pressed': String(fav),
         'aria-label': fav ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة',
         onclick: (e) => { e.stopPropagation(); onToggleFavorite(id); },
-      }, fav ? HEART_ON : HEART_OFF);
+      }, icon(fav ? 'heartOn' : 'heart'));
 
       return h('div', { class: `card surah${isNow ? ' is-playing' : ''}` }, open, heart);
     });

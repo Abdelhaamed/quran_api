@@ -203,12 +203,12 @@ describe('player store rendering', () => {
   it('flips the play glyph and its accessible name with isPlaying', async () => {
     const t = setup({ playback: track({ isPlaying: true }) });
     expect(t.find('.pl-play').getAttribute('aria-label')).toBe('إيقاف');
-    expect(t.find('.pl-play').textContent).toBe('\u23F8');
+    expect(t.find('.pl-play .ic').dataset.icon).toBe('pause');
 
     t.store.setState({ playback: track({ isPlaying: false }) });
     await flush();
     expect(t.find('.pl-play').getAttribute('aria-label')).toBe('تشغيل');
-    expect(t.find('.pl-play').textContent).toBe('\u25B6');
+    expect(t.find('.pl-play .ic').dataset.icon).toBe('play');
   });
 
   it('re-renders on a playback write', async () => {
@@ -255,7 +255,7 @@ describe('player store rendering', () => {
     const t = setup({ playback: track() });
     const heart = t.find('.pl-heart');
     expect(heart.getAttribute('aria-pressed')).toBe('false');
-    expect(heart.textContent).toBe('\u2661');
+    expect(heart.querySelector('.ic').dataset.icon).toBe('heart');
 
     heart.click();
     expect(t.calls.onToggleFavorite).toHaveBeenCalledOnce();
@@ -264,7 +264,7 @@ describe('player store rendering', () => {
     await flush();
     expect(heart.getAttribute('aria-pressed')).toBe('true');
     expect(heart.classList.contains('is-on')).toBe(true);
-    expect(heart.textContent).toBe('\u2665');
+    expect(heart.querySelector('.ic').dataset.icon).toBe('heartOn');
   });
 });
 
@@ -318,31 +318,31 @@ describe('player controls', () => {
     });
   });
 
-  // Glyph identity per control. The four arrows are mirrored for dir=rtl, and
-  // the code points' names are the opposite of their orientations, so the exact
-  // code point is the only assertion that can catch a revert.
+  // Icon identity per control. The mapping lives in src/ui/icons.js, and each
+  // slot's data-icon is the only assertion that can catch a revert — the SVG
+  // markup itself is an implementation detail of the library.
   it('puts the mirrored arrow glyph on each arrow control', () => {
     const t = setup({ playback: track() });
-    const glyph = (sel) => t.find(sel).textContent;
-    expect(glyph('.pl-prev')).toBe('\u23EE');
-    expect(glyph('.pl-next')).toBe('\u23ED');
-    expect(glyph('.pl-back')).toBe('\u23EA');
-    expect(glyph('.pl-fwd')).toBe('\u23E9');
-    expect(glyph('.pl-play')).toBe('\u25B6');
-    expect(glyph('.pl-repeat')).toBe('\u1F501');
-    expect(glyph('.pl-heart')).toBe('\u2661');
+    const glyph = (sel) => t.find(sel).querySelector('.ic').dataset.icon;
+    expect(glyph('.pl-prev')).toBe('prev');
+    expect(glyph('.pl-next')).toBe('next');
+    expect(glyph('.pl-back')).toBe('back');
+    expect(glyph('.pl-fwd')).toBe('fwd');
+    expect(glyph('.pl-play')).toBe('play');
+    expect(glyph('.pl-repeat')).toBe('repeat');
+    expect(glyph('.pl-heart')).toBe('heart');
   });
 
   it('swaps the play glyph and the heart glyph on state, keeping identity exact', async () => {
     const t = setup({ playback: track({ isFavorite: true }) });
-    expect(t.find('.pl-heart').textContent).toBe('\u2665');
-    expect(t.find('.pl-play').textContent).toBe('\u25B6');
+    expect(t.find('.pl-heart .ic').dataset.icon).toBe('heartOn');
+    expect(t.find('.pl-play .ic').dataset.icon).toBe('play');
 
     t.store.setState({ playback: track({ isPlaying: true, isFavorite: false }) });
     await flush();
-    expect(t.find('.pl-play').textContent).toBe('\u23F8');
+    expect(t.find('.pl-play .ic').dataset.icon).toBe('pause');
     expect(t.find('.pl-play').getAttribute('aria-label')).toBe('إيقاف');
-    expect(t.find('.pl-heart').textContent).toBe('\u2661');
+    expect(t.find('.pl-heart .ic').dataset.icon).toBe('heart');
   });
 
   it('keeps every glyph hidden from assistive tech', () => {
@@ -350,7 +350,9 @@ describe('player controls', () => {
     const buttons = [...t.root.querySelectorAll('button')];
     expect(buttons).toHaveLength(7);
     for (const b of buttons) {
-      expect(b.textContent.trim().length, b.className).toBeGreaterThan(0);
+      // The icon is an inline SVG, so the button's text content is empty and
+      // the assertion is on the SVG's presence and its hiding, not on text.
+      expect(b.querySelector('.ic svg'), b.className).not.toBeNull();
       expect(b.querySelector('.ic').getAttribute('aria-hidden'), b.className).toBe('true');
     }
   });

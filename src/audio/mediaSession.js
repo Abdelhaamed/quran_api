@@ -26,6 +26,11 @@ export function createMediaSession(handlers) {
   // `||` would silently turn it into 10.
   set('seekbackward', (e) => handlers.onSeekBy(-(e?.seekOffset ?? 10)));
   set('seekforward', (e) => handlers.onSeekBy(e?.seekOffset ?? 10));
+  // The notification shade's seek bar sends `seekto`, never the two actions
+  // above, so this is what makes dragging that bar do anything at all.
+  set('seekto', (e) => {
+    if (e && Number.isFinite(e.seekToTime)) handlers.onSeekTo(e.seekToTime);
+  });
   set('previoustrack', handlers.onPrev);
   set('nexttrack', handlers.onNext);
 

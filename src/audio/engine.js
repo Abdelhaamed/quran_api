@@ -136,6 +136,16 @@ export function createEngine() {
       el.currentTime = Math.min(Math.max(el.currentTime + delta, 0), max);
     },
 
+    // Absolute seek, driven by the notification shade's seek bar through the
+    // `seekto` media action. The shade never sends seekbackward/seekforward,
+    // so without this its bar is dead even though the audio is seekable.
+    seekTo(time) {
+      if (!current || current.seekable === false) return;
+      if (!Number.isFinite(time)) return;
+      const max = Number.isFinite(el.duration) ? el.duration : Infinity;
+      el.currentTime = Math.min(Math.max(time, 0), max);
+    },
+
     restart() {
       if (!current || current.seekable === false) return;
       el.currentTime = 0;

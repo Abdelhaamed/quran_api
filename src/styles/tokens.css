@@ -25,7 +25,7 @@
   --r-sm: 10px; --r-md: 14px; --r-lg: 20px; --r-full: 999px;
 
   --font-quran: 'Amiri', serif;
-  --font-ui: 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --font-ui: 'Readex Pro', system-ui, sans-serif;
   /* rem, not px, so a user who raises the browser's default font size
      actually gets larger text. */
   --fs-xs: 0.75rem;

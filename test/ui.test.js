@@ -246,18 +246,24 @@ describe('createShell', () => {
     expect(store.getState().activeTab).toBe('reciters');
   });
 
-  it('cycles the theme and writes every step', () => {
+  it('toggles light and dark directly, never landing on an invisible auto', () => {
+    // A three-state cycle (auto → light → dark) made the auto stop look like a
+    // dead press, because auto renders exactly like the system mode already on
+    // screen. The button always lands on an explicit mode, so one press always
+    // visibly flips.
     const label = () => qs('#theme-toggle').getAttribute('aria-label');
     expect(document.documentElement.dataset.theme).toBe('light');
     qs('#theme-toggle').click();
+    expect(store.getState().theme).toBe('dark');
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(label()).toBe('الوضع الليلي مفعّل');
+    expect(JSON.parse(localStorage.getItem('quran.state.v2')).theme).toBe('dark');
+    qs('#theme-toggle').click();
     expect(store.getState().theme).toBe('light');
+    expect(document.documentElement.dataset.theme).toBe('light');
     expect(label()).toBe('الوضع النهاري مفعّل');
     qs('#theme-toggle').click();
     expect(store.getState().theme).toBe('dark');
-    expect(document.documentElement.dataset.theme).toBe('dark');
-    expect(JSON.parse(localStorage.getItem('quran.state.v2')).theme).toBe('dark');
-    qs('#theme-toggle').click();
-    expect(store.getState().theme).toBe('auto');
   });
 
   it('resolves a stored theme exactly the way the pre-paint script does', () => {

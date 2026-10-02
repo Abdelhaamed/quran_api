@@ -1,5 +1,6 @@
 import { qs, qsa } from '../utils/dom.js';
 import { writeState } from '../state/persist.js';
+import { icon } from './icons.js';
 
 export const TABS = ['reciters', 'surahs', 'favorites', 'radio'];
 export const THEMES = ['auto', 'light', 'dark'];
@@ -33,7 +34,9 @@ export function createShell({ store }) {
   function applyTheme(theme) {
     const dark = resolveDark(theme, darkQuery.matches);
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-    toggle.textContent = dark ? '\u{1F319}' : '\u{2600}';
+    // Replaced rather than text-swapped, so the button always holds exactly
+    // one icon node and never accumulates stale SVGs across toggles.
+    toggle.replaceChildren(icon(dark ? 'moon' : 'sun'));
     toggle.setAttribute('aria-label', dark ? 'الوضع الليلي مفعّل' : 'الوضع النهاري مفعّل');
   }
 
@@ -60,12 +63,12 @@ export function createShell({ store }) {
   }
 
   toggle.addEventListener('click', () => {
-    const order = THEMES;
-    const current = store.getState().theme;
-    // indexOf returns -1 for a theme that is not one of the three, so
-    // (0 - 1 + 3) % 3 lands on 'auto' — the documented fallback, reached
-    // without a separate branch for corrupt stored state.
-    const next = order[(order.indexOf(current) + 1) % order.length];
+    // Two visible states, not three: cycling auto → light → dark → auto made
+    // the auto stop look like a dead press, because auto renders exactly like
+    // the system mode the user was already seeing. The button always lands on
+    // an explicit mode. 'auto' survives only as the never-yet-touched default.
+    const isDark = resolveDark(store.getState().theme, darkQuery.matches);
+    const next = isDark ? 'light' : 'dark';
     store.setState({ theme: next });
     writeState({ theme: next });
     applyTheme(next);

@@ -43,7 +43,10 @@
 .pl-btn.is-on { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
 .pl-play { inline-size: var(--tap-lg); block-size: var(--tap-lg); background: var(--accent); color: var(--accent-contrast); }
 .pl-play:hover { background: var(--accent-strong); }
-.ic { line-height: 1; }
+.ic { line-height: 1; display: inline-flex; }
+/* Inline SVGs scale with the button's font size, so every control keeps its
+   designed size in both themes and at any root font size. */
+.ic svg { width: 1em; height: 1em; flex: none; }
 
 /* After .pl-btn, so the heart keeps its larger glyph instead of inheriting
    --fs-lg from the shared button rule. */
@@ -164,6 +167,19 @@
   background: color-mix(in srgb, var(--gold) 22%, transparent); color: var(--gold);
   font-size: var(--fs-xs); margin-inline-end: var(--sp-1); }
 .chip.muted { background: var(--surface-hover); color: var(--text-faint); }
+
+/* Riwaya picker: a horizontal scroll strip above the reader grid. Scrolls
+   rather than wraps so the grid below keeps its position and the picker never
+   pushes content down. */
+.riwaya-filter { display: flex; gap: var(--sp-2); overflow-x: auto;
+  padding-block: var(--sp-2); margin-block-end: var(--sp-2);
+  scrollbar-width: none; }
+.riwaya-filter::-webkit-scrollbar { display: none; }
+.chip-lg { flex: none; min-block-size: var(--tap); padding-inline: var(--sp-4);
+  border: 1px solid var(--border); border-radius: var(--r-full);
+  background: var(--surface); color: var(--text-muted); font-size: var(--fs-sm); }
+.chip-lg.is-on { border-color: var(--accent); color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent) 14%, transparent); font-weight: 600; }
 
 /* Reader card: a plain wrapper whose only interactive parts are SIBLING buttons —
    the head that expands it and one per riwaya. The card carries no padding so

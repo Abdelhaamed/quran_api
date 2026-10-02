@@ -1,7 +1,12 @@
 import '@fontsource/amiri/400.css';
 import '@fontsource/amiri/700.css';
-import '@fontsource/ibm-plex-sans-arabic/400.css';
-import '@fontsource/ibm-plex-sans-arabic/600.css';
+// Readex Pro for the interface: a modern Arabic UI face with open apertures
+// that stays legible at 12px card labels, where Amiri's Naskh forms blur.
+// Amiri is kept for Quranic headings and surah names only.
+import '@fontsource/readex-pro/arabic-400.css';
+import '@fontsource/readex-pro/arabic-600.css';
+import '@fontsource/readex-pro/latin-400.css';
+import '@fontsource/readex-pro/latin-600.css';
 import './styles/tokens.css';
 import './styles/base.css';
 import './styles/components.css';
@@ -53,6 +58,11 @@ const store = createStore({
   // number: a hand-edited string would never match a reciter id and would leave
   // the view permanently collapsed with nothing to show for it.
   expandedReciterId: Number.isFinite(saved.expandedReciterId) ? saved.expandedReciterId : null,
+  // The riwaya chip filter. A name, not an id: moshaf entries carry no riwaya
+  // id, so the filter matches by containment and the stored value must be the
+  // same string the filter compares against.
+  riwayaFilter: typeof saved.riwayaFilter === 'string' ? saved.riwayaFilter : null,
+  radioCategory: typeof saved.radioCategory === 'string' ? saved.radioCategory : 'all',
   selectedMoshaf: null,
   playback: null,
   repeat: saved.repeat === 'one' ? 'one' : 'off',
@@ -413,7 +423,10 @@ const reciters = createRecitersView({
   // is selected — the same reader ships 114 surahs under one and 38 under
   // another — so the reader's first riwaya is never auto-selected here.
   onSelectMoshaf(_reciter, moshaf) {
-    store.setState({ selectedMoshafId: moshaf.id, activeTab: 'surahs' });
+    // The query served its purpose (finding the reader), so it is cleared:
+    // leaving a reader name in the box would filter the surah grid down to
+    // nothing, since no surah name contains it.
+    store.setState({ selectedMoshafId: moshaf.id, activeTab: 'surahs', query: '' });
     writeState({ selectedMoshafId: moshaf.id });
     resolveMoshaf();
   },
@@ -450,6 +463,7 @@ const session = createMediaSession({
   onPause: () => engine.pause(),
   onStop: () => engine.pause(),
   onSeekBy: (d) => engine.seekBy(d),
+  onSeekTo: (t) => engine.seekTo(t),
   onNext: advance,
   onPrev: previous,
 });
@@ -510,6 +524,8 @@ addEventListener('offline', () => store.setState({ offline: true }));
 store.subscribe((s, keys) => {
   if (keys.has('activeTab')) writeState({ activeTab: s.activeTab });
   if (keys.has('expandedReciterId')) writeState({ expandedReciterId: s.expandedReciterId });
+  if (keys.has('riwayaFilter')) writeState({ riwayaFilter: s.riwayaFilter });
+  if (keys.has('radioCategory')) writeState({ radioCategory: s.radioCategory });
 });
 
 const dataAbort = new AbortController();

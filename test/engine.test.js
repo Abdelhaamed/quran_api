@@ -235,6 +235,24 @@ describe('engine', () => {
     expect(engine.element.currentTime).toBe(30);
   });
 
+  it('seeks to an absolute time, clamped to the known duration', async () => {
+    await engine.play(surah(1));
+    engine.element.currentTime = 10;
+
+    engine.seekTo(45);
+    expect(engine.element.currentTime).toBe(45);
+
+    expect(() => engine.seekTo(NaN)).not.toThrow();
+    expect(engine.element.currentTime).toBe(45);
+  });
+
+  it('ignores an absolute seek on a non-seekable stream', async () => {
+    await engine.play({ ...surah(1), seekable: false, kind: 'radio' });
+    engine.element.currentTime = 0;
+    engine.seekTo(60);
+    expect(engine.element.currentTime).toBe(0);
+  });
+
   it('retries a failed load once before reporting an error', () => {
     const onError = vi.fn();
     engine.on('error', onError);
@@ -321,7 +339,7 @@ describe('mediaSession', () => {
 
   const handlers = () => ({
     onPlay: vi.fn(), onPause: vi.fn(), onStop: vi.fn(),
-    onSeekBy: vi.fn(), onNext: vi.fn(), onPrev: vi.fn(),
+    onSeekBy: vi.fn(), onSeekTo: vi.fn(), onNext: vi.fn(), onPrev: vi.fn(),
   });
 
   beforeEach(install);
@@ -336,7 +354,7 @@ describe('mediaSession', () => {
     createMediaSession(h);
     expect(Object.keys(registered).sort()).toEqual([
       'nexttrack', 'pause', 'play', 'previoustrack',
-      'seekbackward', 'seekforward', 'stop',
+      'seekbackward', 'seekforward', 'seekto', 'stop',
     ]);
     expect(registered.play).toBe(h.onPlay);
     expect(registered.nexttrack).toBe(h.onNext);
@@ -362,6 +380,18 @@ describe('mediaSession', () => {
     expect(h.onSeekBy).toHaveBeenCalledWith(5);
     registered.seekforward({ seekOffset: 0 });
     expect(h.onSeekBy).toHaveBeenLastCalledWith(0);
+  });
+
+  it('routes an absolute seekTo to its own handler, ignoring a missing time', () => {
+    // The notification shade's seek bar sends `seekto`, never seekbackward or
+    // seekforward, so without this the shade's bar is dead on arrival.
+    const h = handlers();
+    createMediaSession(h);
+    registered.seekto({ seekToTime: 42 });
+    expect(h.onSeekTo).toHaveBeenCalledWith(42);
+    registered.seekto({});
+    registered.seekto();
+    expect(h.onSeekTo).toHaveBeenCalledTimes(1);
   });
 
   it('routes play, pause and stop to their own handlers', () => {
@@ -448,9 +478,9 @@ describe('mediaSession', () => {
   // without it the test passes whenever nothing was registered at all.
   it('clears every handler it bound on destroy', () => {
     const s = createMediaSession(handlers());
-    expect(actions.size).toBe(7);
+    expect(actions.size).toBe(8);
     s.destroy();
-    expect(actions.size).toBe(7);
+    expect(actions.size).toBe(8);
     expect([...actions.values()].every((fn) => fn === null)).toBe(true);
   });
 

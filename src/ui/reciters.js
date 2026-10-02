@@ -13,8 +13,13 @@ import { matchesAll } from '../utils/arabic.js';
  * `selectedMoshafId` exactly as the user left it until a riwaya is tapped.
  */
 export function createRecitersView({ root, store, onSelectMoshaf }) {
+  // A riwaya picker above the grid: 20 canonical riwayas, and tapping one
+  // shows only the readers carrying it. This is the answer to a reader card
+  // growing to an impractical height when it holds several riwayas — the
+  // choice moves up front, and the card only expands on demand.
+  const chips = h('div', { class: 'riwaya-filter', role: 'group', 'aria-label': 'تصفية حسب الرواية' });
   const grid = h('div', { class: 'grid grid-reciters' });
-  root.append(grid);
+  root.append(chips, grid);
 
   // `getReciters` maps `(r.moshaf || [])`, so a live payload always yields an
   // array. The guards below are for the OTHER route into this view's state: the
@@ -113,23 +118,62 @@ function canRecite(moshafs, surahIds) {
   return moshafs.some((m) => (m.surahList ?? []).some((id) => surahIds.has(id)));
 }
 
-function render() {
+  function renderChips(s) {
+    // "الكل" clears the filter. Chips show a count so the user sees how many
+    // readers each riwaya has before tapping.
+    const all = h('button', {
+      class: `chip-lg${!s.riwayaFilter ? ' is-on' : ''}`,
+      type: 'button',
+      'aria-pressed': String(!s.riwayaFilter),
+      onclick: () => store.setState({ riwayaFilter: null }),
+    }, `الكل · ${s.reciters.length}`);
+    const nodes = [all];
+    for (const rw of s.riwayat || []) {
+      const n = s.reciters.filter((r) =>
+        moshafsOf(r).some((m) => (m.name || '').includes(rw.name))).length;
+      if (n === 0) continue;
+      nodes.push(h('button', {
+        class: `chip-lg${s.riwayaFilter === rw.name ? ' is-on' : ''}`,
+        type: 'button',
+        'aria-pressed': String(s.riwayaFilter === rw.name),
+        onclick: () => store.setState({
+          riwayaFilter: s.riwayaFilter === rw.name ? null : rw.name,
+        }),
+      }, `${rw.name} · ${n}`));
+    }
+    chips.replaceChildren(frag(nodes));
+  }
+
+  function render() {
     const s = store.getState();
+
+    // The picker lists the 20 canonical riwayas from /riwayat. A reader
+    // matches when any of its moshaf names contains the riwaya name — verified
+    // against all 22 distinct moshaf names, with zero misses. The overlaps are
+    // benign: "قالون عن نافع" also matches "قالون عن نافع من طريق أبي نشيط",
+    // which genuinely is that riwaya down a named path.
+    renderChips(s);
+    let list = s.reciters;
+    if (s.riwayaFilter) {
+      list = list.filter((r) => moshafsOf(r).some((m) => (m.name || '').includes(s.riwayaFilter)));
+    }
     // One box, one query, four views — and each view filters its own data. A
     // reciter matches on its own name, on any of its riwaya names, and on any
     // surah it can recite, so "حفص" finds a reader whose name does not contain
-    // the riwaya and "الكهف" finds the readers who have that surah.
-    const list = s.query
+    // the riwaya and "الكهف" finds the readers who have that surah. The riwaya
+    // filter above and this query combine: both must pass.
+    const queried = s.query
       ? (() => {
           const surahIds = matchingSurahIds(s.suwarById, s.query);
-          return s.reciters.filter((r) => {
+          return list.filter((r) => {
             const moshafs = moshafsOf(r);
             return matchesAll(r.name, s.query) ||
               moshafs.some((m) => matchesAll(m.name, s.query)) ||
               canRecite(moshafs, surahIds);
           });
         })()
-      : s.reciters;
+      : list;
+    list = queried;
 
     if (list.length === 0) {
       grid.replaceChildren(h('p', { class: 'empty' },
@@ -160,6 +204,7 @@ function render() {
   // result set for the rest of the session.
   const unsubscribe = store.subscribe((_s, keys) => {
     if (keys.has('reciters') || keys.has('query') || keys.has('suwarById') ||
+        keys.has('riwayat') || keys.has('riwayaFilter') ||
         keys.has('selectedMoshafId') || keys.has('expandedReciterId')) render();
   }, { immediate: true });
 

@@ -1,4 +1,5 @@
 import { h } from '../utils/dom.js';
+import { icon, setIcon } from './icons.js';
 
 // The engine's `time` event rides the element's `timeupdate`, whose cadence the
 // browser chooses and throttles: it is not guaranteed while a page is
@@ -7,32 +8,10 @@ import { h } from '../utils/dom.js';
 // guaranteed update in this repo's test environment.
 const TICK_MS = 250;
 
-// Unicode rather than the brief's HTML entities, so the glyph is set as text and
-// inherits colour like any other text.
-//
-// TWO DIFFERENT RULES apply to the four arrows, and the inconsistency between
-// them is deliberate (R24). Do not "correct" one to match the other:
-//
-//   prev / next  MIRROR with reading direction. The row is dir=rtl, so
-//                "previous" sits to the RIGHT of play and takes the
-//                right-pointing glyph:  prev = U+23EE, next = U+23ED.
-//   back / fwd   DO NOT mirror. They encode TIME direction, not reading
-//                direction, so they keep the conventional media orientation:
-//                back = U+23EA (rewind), fwd = U+23E9 (fast-forward).
-//
-// The code point NAMES are the opposite of the orientations, which is exactly
-// what makes this read as a mistake. Measured from the rasterised ink centroid,
-// not guessed: U+23E9 leans left, U+23EA right, U+23ED left, U+23EE right.
-//
-// Every code point below is asserted exactly, by
-// "puts the mirrored arrow glyph on each arrow control" in test/player.test.js.
-// If one of these looks wrong, change the test AND this comment together,
-// never one alone: two commits have now shipped a mapping that contradicted
-// the comment sitting directly above it.
-const GLYPH = {
-  play: '\u25B6', pause: '\u23F8', prev: '\u23EE', next: '\u23ED',
-  back: '\u23EA', fwd: '\u23E9', repeat: '\u1F501', heart: '\u2661', heartOn: '\u2665',
-};
+// Icons come from src/ui/icons.js (inline Bootstrap SVGs). The mapping there
+// carries the settled RTL rules: prev/next point with reading direction,
+// rewind/fast-forward encode time direction. Change the mapping there, never
+// here: two commits have shipped a mapping contradicting the comment above it.
 
 // With the player hidden there is nothing to reserve for it, but the home
 // indicator still overlaps the last card, so the inset stays.
@@ -52,11 +31,9 @@ export function createPlayer({
   onPrev = () => {},
   onToggleFavorite = () => {},
 }) {
-  // The positioning, not the caller's business: the caller may pass a bare div
-  // and the fixed-player CSS still has to apply.
+  // Positioning is the player's own business: the caller may pass a bare div
+  // and the fixed-player CSS still applies.
   root.classList.add('pl');
-
-  const icon = (name) => h('span', { class: 'ic', 'aria-hidden': 'true' }, GLYPH[name]);
 
   const els = {
     heart: h('button', { class: 'pl-btn pl-heart', type: 'button', 'aria-label': 'إضافة إلى المفضلة', 'aria-pressed': 'false' }, icon('heart')),
@@ -131,7 +108,7 @@ export function createPlayer({
 
   const setGlyph = (btn, name) => {
     const slot = btn.firstChild;
-    if (slot && slot.textContent !== GLYPH[name]) slot.textContent = GLYPH[name];
+    if (slot) setIcon(slot, name);
   };
 
   // The reserved space is measured rather than guessed at a fixed --player-h:
