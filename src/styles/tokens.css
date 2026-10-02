@@ -11,9 +11,12 @@
   /* 4.94:1 on --surface, the lightest surface text ever lands on. Cards use
      --surface, so this must clear AA there and not just on --bg. */
   --text-faint: #a89e95;
-  --accent: #00d4e6;
-  --accent-strong: #6ff0ff;
-  --accent-contrast: #06252a;
+  /* Islamic gold as the interactive color: selection borders, hovers, active
+     states, and the primary button all read from --accent. Dark text on gold
+     is 7.86:1; gold on the background is 7.86:1. The hover variant lightens. */
+  --accent: #d4af6a;
+  --accent-strong: #e0bc7a;
+  --accent-contrast: #241f1f;
   --gold: #d4af6a;
   --danger: #ff7a6b;
   --shadow: 0 2px 12px rgb(0 0 0 / .35);
@@ -57,8 +60,10 @@
   --text: #1f1a18;
   --text-muted: #5c534c;
   --text-faint: #77604a;
-  --accent: #007785;
-  --accent-strong: #006b78;
+  /* Same Islamic gold, deepened for the light background: white on it is
+     5.04:1, and it on the background is 4.72:1. The hover variant deepens. */
+  --accent: #8a6a24;
+  --accent-strong: #7d5f1f;
   --accent-contrast: #ffffff;
   --gold: #8a6a24;
   --danger: #c0392b;

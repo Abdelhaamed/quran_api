@@ -191,7 +191,8 @@
    the head that expands it and one per riwaya. The card carries no padding so
    the head button fills it and stays a full-size target; padding it here would
    leave a dead strip around the head that looks tappable and is not. */
-.reciter { padding: 0; }
+.reciter { padding: var(--sp-4); text-align: start; }
+.reciter:hover { background: var(--surface-hover); border-color: var(--accent); }
 .reciter-head {
   display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
   inline-size: 100%; padding: var(--sp-4); text-align: start; border-radius: var(--r-md);
@@ -274,19 +275,27 @@
   color: var(--text-faint); display: grid; place-items: center; }
 .heart.is-on { color: var(--danger); }
 
-.list { display: grid; gap: var(--sp-1); }
-/* The row is a wrapper so the heart sits beside the station button without
-   nesting one button inside another. */
-.row-wrap { display: flex; align-items: stretch; gap: var(--sp-1); }
-.row-wrap .row { flex: 1; min-width: 0; }
-.row-wrap .heart { position: static; flex: none; align-self: center; }
-.row { display: flex; align-items: center; gap: var(--sp-3); min-block-size: var(--tap);
-  padding: var(--sp-2) var(--sp-4); background: var(--surface);
-  border: 1px solid var(--border); border-radius: var(--r-md); text-align: start; }
-.row:hover { background: var(--surface-hover); }
-.row-dot { inline-size: 8px; block-size: 8px; border-radius: var(--r-full); background: var(--text-faint); }
-.row.is-playing .row-dot { background: var(--accent); }
-.row.is-playing .row-name { color: var(--accent-strong); }
+.list { display: grid; gap: var(--sp-2); }
+/* One station per row on the phone; a filling grid on larger screens, matching
+   the reader and surah grids' breakpoints. */
+@media (min-width: 768px) {
+  .list { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+}
+/* The wrapper IS the card: background, border and padding live here, with the
+   station button and the heart as siblings inside it — never nested, so both
+   stay keyboard-reachable. */
+.row-wrap { display: flex; align-items: center; gap: var(--sp-1);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4); }
+.row-wrap:hover { background: var(--surface-hover); border-color: var(--accent); }
+.row-wrap.is-playing { border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.row-wrap .row { flex: 1; min-width: 0; background: none; border: 0; padding: 0; text-align: start; }
+.row-wrap .heart { position: static; flex: none; }
+.row { display: flex; align-items: center; gap: var(--sp-3); min-block-size: var(--tap); text-align: start; }
+.row-dot { inline-size: 8px; block-size: 8px; border-radius: var(--r-full); background: var(--text-faint); flex: none; }
+.row-wrap.is-playing .row-dot { background: var(--accent); }
+.row-wrap.is-playing .row-name { color: var(--accent-strong); }
 .row-name { font-size: var(--fs-sm); }
 
 /* A grid, not a bare block, so the favorites empty state can put its button
