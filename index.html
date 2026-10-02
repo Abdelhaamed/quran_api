@@ -1,73 +1,85 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ar" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="normalize.css" />
-    <link rel="stylesheet" href="main.css" />
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400;1,700&display=swap"
-    rel="stylesheet">
-        <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-
-    <title>quran</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#241f1f">
+<meta name="description" content="استماع لتلاوات القرآن الكريم بأصوات كبار القرّاء">
+<title>القرآن الكريم</title>
+<link rel="icon" href="/quran_api/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/quran_api/icons/apple-touch-icon.png">
+<script>
+  // Runs before first paint so the theme never flashes. The rule here is
+  // duplicated from applyTheme() in src/ui/shell.js, and the duplication is
+  // deliberate: this must not wait for the module graph, which cannot resolve
+  // before the first paint. If the two ever disagree the app visibly repaints
+  // the wrong theme, which is the flash this script exists to prevent — so
+  // test/ui.test.js boots the app and compares both results.
+  (function () {
+    try {
+      var saved = JSON.parse(localStorage.getItem('quran.state.v2') || '{}').theme || 'auto';
+      var dark = saved === 'dark' || (saved === 'auto' &&
+        matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    } catch (e) {
+      document.documentElement.dataset.theme = 'dark';
+    }
+  })();
+</script>
 </head>
 <body>
-
-    <div class="header"> 
-
-        <div class="aya"> ﴾ وَإِذَا قُرِئَ ٱلۡقُرۡءَانُ فَٱسۡتَمِعُواْ لَهُۥ وَأَنصِتُواْ لَعَلَّكُمۡ تُرۡحَمُونَ ﴿</div>
-        <div class="image"><img src="image/people-celebrating-ramadan-together.jpg" alt=""></div>
-       
+<!--
+  Appbar, search and tabs are ONE sticky group, not three stacked `position:
+  sticky` siblings. Stacking them needs each bar's height as a pixel offset
+  for the bar below it, and those heights are content-derived: the appbar has
+  a safe-area inset, the searchbar is padding plus an input. The plan's version
+  hardcoded 61px where the searchbar is really 72px, so the tabs sat 11px over
+  the search field, and no constant derived that way survives a raised root
+  font size. One group has no offsets to keep in sync. See .topbar in
+  src/styles/components.css.
+-->
+<header class="topbar">
+  <div class="appbar">
+    <h1 class="appbar-title">القرآن الكريم</h1>
+    <div class="appbar-actions">
+      <!-- Inline SVGs so the buttons are never empty before JS boots;
+           createShell rewrites the theme icon on boot. -->
+      <button id="theme-toggle" class="icon-btn" type="button" aria-label="تبديل السمة"><span class="ic" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M6 .278a.77.77 0 0 1 .08.858 7.2 7.2 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277q.792-.001 1.533-.16a.79.79 0 0 1 .81.316.73.73 0 0 1-.031.893A8.35 8.35 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.75.75 0 0 1 6 .278"/></svg></span></button>
+      <button id="install" class="icon-btn" type="button" aria-label="تثبيت التطبيق" hidden><span class="ic" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708z"/></svg></span></button>
     </div>
-        <div class="asma">
-        <h1>جميع قراء القران الكريم</h1>
-       <div class="search"> <input type="text" id="search" placeholder="ابحث عن قارئك المفضل"></div>
-        <div id="all" class="all">
-            
-        </div>
-        <button class="show-more">إظهار المزيد</button>
-    
-    </div>
-            <div class="rya">
-                <h1>اختر الروايه</h1>
-                <div id="allr" class="allr">
-                  
-                </div>
-                
-            </div>
+  </div>
 
-            <div class="surah">
-                <h1>اختر السوره</h1>
-                <div id="alls" class="alls">
+  <nav class="tabs" role="tablist" aria-label="الأقسام">
+    <button id="tab-reciters" class="tab" role="tab" data-tab="reciters" aria-controls="view-reciters" aria-selected="true">القرّاء</button>
+    <button id="tab-surahs" class="tab" role="tab" data-tab="surahs" aria-controls="view-surahs" aria-selected="false">السور</button>
+    <button id="tab-favorites" class="tab" role="tab" data-tab="favorites" aria-controls="view-favorites" aria-selected="false">المفضلة</button>
+    <button id="tab-radio" class="tab" role="tab" data-tab="radio" aria-controls="view-radio" aria-selected="false">البث</button>
+  </nav>
 
-                </div>
-                
-            </div>
-    <div class="audio">
-        <audio id="audio" controls autoplay>
-            <source class="hhh" src="" type="audio/ogg">
-            <source class="hhh" src="" type="audio/mpeg">
-            Your browser does not support the audio element.
-            </audio>
-            </div>
-            <div class="video" >
-                <h1>اختر قناه البث المباشر</h1>
-                <div class="butt">
-                    <a href="javascript:void()" onclick="playvideo('https://win.holol.com/live/sunnah/playlist.m3u8')">قناه السنه النبويه</a>
-                <a href="javascript:void()" onclick="playvideo('https://win.holol.com/live/quran/playlist.m3u8')">قناه القران الكريم</a>
-             </div>
-                <div class="image">
-            <img src="image/illuminated-minaret-symbolizes-spirituality-famous-blue-mosque-generated-by-ai.jpg" alt="">
-        </div>
-       <video  controls autoplay id="videochanel"   >
-        <source src="" type="video/mp4">
-        <source src="" type="video/ogg">
-        Your browser does not support the video tag.
-    </video>
-    </div>
-<button onclick="goToTop()" id="myBtn" title="Go to top">للاعلي</button>
-    <script src="main.js"></script>
+  <div class="searchbar">
+    <span class="search-icon ic" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001q.044.06.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1 1 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0"/></svg></span>
+    <input id="search" type="search" inputmode="search" autocomplete="off"
+           placeholder="ابحث عن قارئ أو سورة أو قناة" aria-label="ابحث عن قارئ أو سورة أو قناة">
+  </div>
+
+  <!-- In flow inside the sticky group, not a fixed bar: an offline notice that
+       overlays the search field or the tabs would cover the two controls the
+       user needs in order to fix the connection it is complaining about. -->
+  <div class="banner" id="banner" role="status" hidden></div>
+</header>
+
+<main class="views">
+  <section id="view-reciters" class="view" role="tabpanel" aria-labelledby="tab-reciters"></section>
+  <section id="view-surahs" class="view" role="tabpanel" aria-labelledby="tab-surahs" hidden></section>
+  <section id="view-favorites" class="view" role="tabpanel" aria-labelledby="tab-favorites" hidden></section>
+  <section id="view-radio" class="view" role="tabpanel" aria-labelledby="tab-radio" hidden></section>
+</main>
+
+<!-- No class: createPlayer adds `pl`, which is the class the stylesheet
+     styles. A second class name here would only be a second thing to keep in
+     step with it. -->
+<div id="player" hidden></div>
+<div class="toast" id="toast" role="status" hidden></div>
+<script type="module" src="/src/main.js"></script>
 </body>
 </html>

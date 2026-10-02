@@ -1,0 +1,117 @@
+import { defineConfig } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
+import { fileURLToPath } from 'node:url';
+
+export default defineConfig({
+  base: '/quran_api/',
+  build: {
+    target: 'es2020',
+    assetsInlineLimit: 4096,
+    cssCodeSplit: false,
+  },
+  test: {
+    environment: 'node',
+    // `virtual:pwa-register` exists only inside Vite's dev server and build.
+    // Tests resolve through Node, so without this alias every suite importing
+    // src/main.js fails at import time. Scoped to `test` so the production
+    // build still resolves the real virtual module through the plugin.
+    // fileURLToPath, not .pathname: on Windows the path contains a drive
+    // letter and spaces, which a raw pathname mangles.
+    alias: {
+      'virtual:pwa-register': fileURLToPath(new URL('./test/stubs/pwa-register.js', import.meta.url)),
+    },
+    include: ['test/**/*.test.js'],
+  },
+  plugins: [
+    VitePWA({
+      registerType: 'prompt',
+      injectRegister: false,
+      // globPatterns already matches everything in public/, so letting the
+      // plugin inject manifest.icons as additionalManifestEntries too would
+      // precache those icons twice.
+      includeManifestIcons: false,
+      manifest: {
+        name: 'القرآن الكريم',
+        short_name: 'القرآن',
+        description: 'استماع لتلاوات القرآن الكريم بأصوات كبار القرّاء',
+        lang: 'ar',
+        dir: 'rtl',
+        start_url: '/quran_api/',
+        scope: '/quran_api/',
+        display: 'standalone',
+        orientation: 'portrait',
+        background_color: '#241f1f',
+        theme_color: '#241f1f',
+        icons: [
+          { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: 'icons/maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,svg,woff2,png}'],
+        cleanupOutdatedCaches: true,
+        // Both keys below must be explicit. vite-plugin-pwa defaults
+        // navigateFallback to 'index.html', so merely omitting it still emits a
+        // NavigationRoute ahead of runtimeCaching and shadows the pages-v1 route.
+        navigateFallback: null,
+        // Navigations are NetworkFirst with a 3s timeout so a fresh shell is
+        // picked up after a deploy. CacheFirst would pin the old index.html for
+        // the full maxAgeSeconds, because cleanupOutdatedCaches only removes
+        // caches whose name contains '-precache-' and so never prunes
+        // pages-v1/api-v1/assets-v1 across service-worker versions.
+        runtimeCaching: [
+          {
+            urlPattern: ({ url, request }) =>
+              request.mode === 'navigate' &&
+              url.origin === self.location.origin,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'pages-v1',
+              networkTimeoutSeconds: 3,
+              expiration: { maxEntries: 4, maxAgeSeconds: 604800 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // The predicate below is serialized into sw.js and evaluated in
+            // the service worker, so it may NOT close over a build-time
+            // constant: it would become a free variable and throw
+            // ReferenceError on every request. Inline the literal.
+            //
+            // hostname is used rather than origin.endsWith, because
+            // `https://notmp3quran.net` also ends with 'mp3quran.net'.
+            // The .mp3 exclusion makes "audio is never cached" structural
+            // rather than incidental: surah audio lives on
+            // server*.mp3quran.net, which WOULD otherwise match this rule.
+            // Lowercased so a .MP3 cannot slip past the exclusion.
+            urlPattern: ({ url }) =>
+              (url.hostname === 'mp3quran.net' || url.hostname.endsWith('.mp3quran.net')) &&
+              !url.pathname.toLowerCase().endsWith('.mp3'),
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'api-v1',
+              expiration: { maxEntries: 12, maxAgeSeconds: 86400 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            urlPattern: ({ request, url }) =>
+              url.origin === self.location.origin &&
+              ['style', 'script', 'worker', 'font', 'image'].includes(request.destination),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'assets-v1',
+              expiration: { maxEntries: 60, maxAgeSeconds: 2592000 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
+        // Audio is never cached. mp3quran audio lives on server*.mp3quran.net,
+        // which the api-v1 predicate matches by hostname — the case-insensitive
+        // .mp3 exclusion above is what excludes it. backup.qurango.net radio
+        // streams match no route at all. Do not add a route for either.
+      },
+    }),
+  ],
+});

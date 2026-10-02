@@ -18,6 +18,7 @@
 - Exactly one `<audio>` element for the entire session. Never `new Audio()`. Never `AudioContext` or `createMediaElementSource`.
 - No `crossOrigin` on the audio element — direct `<audio src>` needs no CORS, and setting it adds a failure mode.
 - Audio never enters the Cache Storage. Media is `NetworkOnly`.
+- `navigateFallback` must be explicitly `null` and `includeManifestIcons` explicitly `false`: vite-plugin-pwa's own defaults would register a `NavigationRoute` that shadows the `pages-v1` route and precache every icon twice.
 - `surah_list` comes from the selected moshaf, never from the global surah list.
 - Favorites key is `${surahId}:${moshafId}` because `moshaf.id` is globally unique (verified 287/287).
 - Recitation style is parsed from `moshaf.name`, never from `moshaf_type` (opaque codes: 11, 222, 213).
@@ -64,7 +65,7 @@
 
 **Files:**
 - Create: `package.json`, `vite.config.js`, `.gitignore`, `.github/workflows/deploy.yml`
-- Create: `public/icons/icon.svg`, `scripts/generate-icons.mjs`, `public/.nojekyll`
+- Create: `public/icons/icon.svg`, `public/favicon.svg`, `scripts/generate-icons.mjs`, `public/.nojekyll`
 - Create: `src/styles/tokens.css`, `src/styles/base.css`
 - Delete: `normalize.css`, `main.css`, `main.js`, `image/`
 
@@ -118,10 +119,13 @@ Expected: exit 0, no `ERESOLVE`. Then `npm ls vite vite-plugin-pwa vitest` shows
   --bg-elevated: #2e2828;
   --surface: #353030;
   --surface-hover: #3f3939;
-  --border: #4a4444;
+  /* Decorative card boundaries only; interactive boundaries use --accent. */
+  --border: #6b625c;
   --text: #f5f0e9;
   --text-muted: #b5aca3;
-  --text-faint: #857c74;
+  /* 4.94:1 on --surface, the lightest surface text ever lands on. Cards use
+     --surface, so this must clear AA there and not just on --bg. */
+  --text-faint: #a89e95;
   --accent: #00d4e6;
   --accent-strong: #6ff0ff;
   --accent-contrast: #06252a;
@@ -137,8 +141,14 @@ Expected: exit 0, no `ERESOLVE`. Then `npm ls vite vite-plugin-pwa vitest` shows
 
   --font-quran: 'Amiri', serif;
   --font-ui: 'IBM Plex Sans Arabic', system-ui, sans-serif;
-  --fs-xs: 12px; --fs-sm: 14px; --fs-base: 16px;
-  --fs-lg: 20px; --fs-xl: 26px; --fs-2xl: 34px;
+  /* rem, not px, so a user who raises the browser's default font size
+     actually gets larger text. */
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.875rem;
+  --fs-base: 1rem;
+  --fs-lg: 1.25rem;
+  --fs-xl: 1.625rem;
+  --fs-2xl: 2.125rem;
 
   --tap: 48px;
   --tap-lg: 64px;
@@ -155,14 +165,17 @@ Expected: exit 0, no `ERESOLVE`. Then `npm ls vite vite-plugin-pwa vitest` shows
   --bg-elevated: #ffffff;
   --surface: #ffffff;
   --surface-hover: #f0ebe3;
-  --border: #e2dbd0;
+  /* Decorative card boundaries only. Interactive boundaries use --accent.
+     1.85:1 on --bg, deliberately below the 3:1 of WCAG 1.4.11, which governs
+     user-interface components rather than containers. */
+  --border: #c4b79f;
   --text: #1f1a18;
   --text-muted: #5c534c;
-  --text-faint: #8a8078;
-  --accent: #0092a3;
-  --accent-strong: #00707e;
+  --text-faint: #77604a;
+  --accent: #007785;
+  --accent-strong: #006b78;
   --accent-contrast: #ffffff;
-  --gold: #a97f2f;
+  --gold: #8a6a24;
   --danger: #c0392b;
   --shadow: 0 2px 12px rgb(31 26 24 / .10);
   --scrim: rgb(31 26 24 / .35);
@@ -195,7 +208,18 @@ body {
 }
 
 h1, h2, h3 { line-height: 1.25; font-weight: 600; }
-button, input, select { font: inherit; color: inherit; }
+/* line-height is set explicitly because the `font` shorthand resets it to
+   normal, which breaks baseline alignment inside fixed-height buttons.
+   appearance: none removes the platform's tinted rounded field styling so the
+   app's own radii apply. textarea is included so no field falls back to the
+   browser's ~11px default. */
+button, input, select, textarea {
+  font: inherit;
+  line-height: 1.4;
+  color: inherit;
+  appearance: none;
+}
+input[type='search']::-webkit-search-cancel-button { appearance: auto; }
 button { background: none; border: 0; cursor: pointer; }
 button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   outline: 2px solid var(--accent);
@@ -205,6 +229,8 @@ img, svg { display: block; max-width: 100%; }
 ul, ol { list-style: none; padding: 0; }
 [hidden] { display: none !important; }
 
+/* Firefox needs the standard properties; the ::-webkit rules are ignored there. */
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--r-full); }
 
@@ -215,39 +241,40 @@ ul, ol { list-style: none; padding: 0; }
 
 - [ ] **Step 5: Create the app icon and generate PNGs**
 
-`public/icons/icon.svg`:
+Geometry only, no text. A `<text>` glyph rasterizes differently on every host,
+because librsvg resolves `font-family` through whatever fontconfig happens to
+have installed — the committed PNGs would be correct by accident of the machine
+that generated them, and turn into tofu boxes on a bare CI container.
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" fill="#241f1f"/>
-  <g fill="none" stroke="#00d4e6" stroke-width="6" opacity=".55">
-    <path d="M256 40 424 148 424 364 256 472 88 364 88 148Z"/>
-    <path d="M256 96 376 168 376 344 256 416 136 344 136 168Z"/>
-    <path d="M256 96 256 416M136 168 376 344M376 168 136 344"/>
+  <g fill="none" stroke="#00d4e6" stroke-width="7" opacity=".55">
+    <path d="M256 44 440 160 440 352 256 468 72 352 72 160Z"/>
+    <path d="M256 104 384 184 384 328 256 408 128 328 128 184Z"/>
+    <path d="M256 104 256 408M128 184 384 328M384 184 128 328"/>
   </g>
-  <text x="256" y="300" font-family="Amiri, serif" font-size="180"
-        fill="#f5f0e9" text-anchor="middle">ق</text>
+  <circle cx="256" cy="256" r="34" fill="none" stroke="#d4af6a" stroke-width="7"/>
 </svg>
 ```
 
 `scripts/generate-icons.mjs`:
 
 ```js
-import sharp from 'sharp';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import sharp from 'sharp';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = join(root, 'public', 'icons');
 await mkdir(outDir, { recursive: true });
 
-const svg = await import('node:fs/promises').then((fs) =>
-  fs.readFile(join(outDir, 'icon.svg'))
-);
+const svg = await readFile(join(outDir, 'icon.svg'));
+const square = await sharp(svg).resize(512, 512).png().toBuffer();
 
-// Maskable icons need 10% safe padding, so the glyph is scaled down.
-const plain = await sharp(svg).resize(512, 512).png().toBuffer();
+// Maskable icons are cropped to a circle of half the canvas, so the glyph is
+// scaled to 360px and re-centred, leaving ~15% padding per side.
 const maskable = await sharp(svg)
   .resize(360, 360)
   .extend({
@@ -258,10 +285,10 @@ const maskable = await sharp(svg)
   .toBuffer();
 
 await Promise.all([
-  writeFile(join(outDir, 'icon-192.png'), await sharp(plain).resize(192, 192).toBuffer()),
-  writeFile(join(outDir, 'icon-512.png'), plain),
+  writeFile(join(outDir, 'icon-192.png'), await sharp(square).resize(192, 192).toBuffer()),
+  writeFile(join(outDir, 'icon-512.png'), square),
   writeFile(join(outDir, 'maskable-512.png'), maskable),
-  writeFile(join(outDir, 'apple-touch-icon.png'), await sharp(plain).resize(180, 180).toBuffer()),
+  writeFile(join(outDir, 'apple-touch-icon.png'), await sharp(square).resize(180, 180).toBuffer()),
 ]);
 console.log('icons written to public/icons');
 ```
@@ -271,11 +298,14 @@ Expected: prints `icons written to public/icons`; four PNGs exist. Commit them s
 
 - [ ] **Step 6: Create `vite.config.js`**
 
+Run: `npm run build`, then verify the generated `dist/sw.js`:
+- `Select-String -Path dist/sw.js -Pattern 'API_ORIGIN' -SimpleMatch` matches **nothing** (a free `API_ORIGIN` means a `urlPattern` closed over a build-time constant and will throw `ReferenceError` on every request)
+- `Select-String -Path dist/sw.js -Pattern 'NavigationRoute' -SimpleMatch` matches **nothing** (it would shadow the `pages-v1` route)
+- each of `icons/icon-192.png`, `icons/icon-512.png`, `icons/maskable-512.png`, `icons/apple-touch-icon.png` appears exactly once in the precache list
+
 ```js
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
-
-const API_ORIGIN = 'https://mp3quran.net';
 
 export default defineConfig({
   base: '/quran_api/',
@@ -292,7 +322,10 @@ export default defineConfig({
     VitePWA({
       registerType: 'prompt',
       injectRegister: false,
-      includeAssets: ['icons/*.png', 'favicon.svg'],
+      // globPatterns already matches everything in public/, so letting the
+      // plugin inject manifest.icons as additionalManifestEntries too would
+      // precache those icons twice.
+      includeManifestIcons: false,
       manifest: {
         name: 'القرآن الكريم',
         short_name: 'القرآن',
@@ -314,7 +347,15 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2,png}'],
         cleanupOutdatedCaches: true,
+        // Both keys below must be explicit. vite-plugin-pwa defaults
+        // navigateFallback to 'index.html', so merely omitting it still emits a
+        // NavigationRoute ahead of runtimeCaching and shadows the pages-v1 route.
         navigateFallback: null,
+        // Navigations are NetworkFirst with a 3s timeout so a fresh shell is
+        // picked up after a deploy. CacheFirst would pin the old index.html for
+        // the full maxAgeSeconds, because cleanupOutdatedCaches only removes
+        // caches whose name contains '-precache-' and so never prunes
+        // pages-v1/api-v1/assets-v1 across service-worker versions.
         runtimeCaching: [
           {
             urlPattern: ({ url, request }) =>
@@ -324,12 +365,25 @@ export default defineConfig({
             options: {
               cacheName: 'pages-v1',
               networkTimeoutSeconds: 3,
-              expiration: { maxEntries: 8, maxAgeSeconds: 604800 },
+              expiration: { maxEntries: 4, maxAgeSeconds: 604800 },
               cacheableResponse: { statuses: [0, 200] },
             },
           },
           {
-            urlPattern: ({ url }) => url.origin === API_ORIGIN,
+            // The predicate below is serialized into sw.js and evaluated in
+            // the service worker, so it may NOT close over a build-time
+            // constant: it would become a free variable and throw
+            // ReferenceError on every request. Inline the literal.
+            //
+            // hostname is used rather than origin.endsWith, because
+            // `https://notmp3quran.net` also ends with 'mp3quran.net'.
+            // The .mp3 exclusion makes "audio is never cached" structural
+            // rather than incidental: surah audio lives on
+            // server*.mp3quran.net, which WOULD otherwise match this rule.
+            // Lowercased so a .MP3 cannot slip past the exclusion.
+            urlPattern: ({ url }) =>
+              (url.hostname === 'mp3quran.net' || url.hostname.endsWith('.mp3quran.net')) &&
+              !url.pathname.toLowerCase().endsWith('.mp3'),
             handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'api-v1',
@@ -349,17 +403,38 @@ export default defineConfig({
             },
           },
         ],
-        // Audio must never be cached: streams are large and would break seeking.
-        navigateFallbackDenylist: [/^\/quran_api\/.*\.(mp3|m3u8)$/],
+        // Audio is never cached. mp3quran audio lives on server*.mp3quran.net,
+        // which the api-v1 predicate matches by hostname — the case-insensitive
+        // .mp3 exclusion above is what excludes it. backup.qurango.net radio
+        // streams match no route at all. Do not add a route for either.
       },
     }),
   ],
 });
 ```
 
-Audio URLs live on `server*.mp3quran.net` and `backup.qurango.net`, which match no route predicate above, so Workbox never intercepts them. Do not add a route that matches `*.mp3`.
+Audio URLs are never cached. Surah audio lives on `server*.mp3quran.net`, whose hostname **does** match the `api-v1` predicate — the case-insensitive `.mp3` exclusion inside that predicate is what keeps it out of the cache. Radio lives on `backup.qurango.net`, which matches no route at all. Do not add a route covering either, and do not remove that exclusion.
 
-- [ ] **Step 7: Create `.gitignore`**
+- [ ] **Step 7: Create `public/favicon.svg`**
+
+Same geometry as `icons/icon.svg`, so the browser tab and the installed app
+share one mark.
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="12" fill="#241f1f"/>
+  <g fill="none" stroke="#00d4e6" stroke-width="2" opacity=".6">
+    <path d="M32 6 55 20 55 44 32 58 9 44 9 20Z"/>
+    <path d="M32 13 48 23 48 41 32 51 16 41 16 23Z"/>
+    <path d="M32 13 32 51M16 23 48 41M48 23 16 41"/>
+  </g>
+  <circle cx="32" cy="32" r="4.5" fill="none" stroke="#d4af6a" stroke-width="2"/>
+</svg>
+```
+
+`index.html` in Task 6 references `/quran_api/favicon.svg`, so it must exist.
+
+- [ ] **Step 8: Create `.gitignore`**
 
 ```
 node_modules/
@@ -370,7 +445,18 @@ dev-dist/
 .DS_Store
 ```
 
-- [ ] **Step 8: Create `.github/workflows/deploy.yml`**
+- [ ] **Step 8b: Create `.gitattributes`**
+
+`core.autocrlf` is on for this host, so `git add` warns `LF will be replaced by
+CRLF` on every text file. Blobs are stored as LF either way, but pinning it
+stops the warning and keeps the working tree predictable.
+
+```
+* text=auto eol=lf
+*.png binary
+```
+
+- [ ] **Step 9: Create `.github/workflows/deploy.yml`**
 
 ```yaml
 name: Deploy to GitHub Pages
@@ -403,6 +489,9 @@ jobs:
       - uses: actions/upload-pages-artifact@v5.0.0
         with:
           path: dist
+          # Defaults to false in v5, which would exclude dist/.nojekyll from the
+          # artifact and let Pages run Jekyll over the output.
+          include-hidden-files: true
 
   deploy:
     needs: build
@@ -418,14 +507,14 @@ jobs:
         uses: actions/deploy-pages@v5.0.1
 ```
 
-- [ ] **Step 9: Remove legacy files**
+- [ ] **Step 10: Remove legacy files**
 
 ```bash
 git rm -q normalize.css main.css main.js
 git rm -rq image
 ```
 
-- [ ] **Step 10: Verify the empty shell builds and serves**
+- [ ] **Step 11: Verify the empty shell builds and serves**
 
 Temporarily create `index.html`:
 
@@ -440,17 +529,23 @@ Temporarily create `index.html`:
 Run: `npm run build` then `npm run preview -- --port 4173`
 Expected: build prints `dist/index.html`; preview serves on 4173. Confirm `dist/index.html` contains `/quran_api/` asset paths and `dist/sw.js` plus `dist/manifest.webmanifest` exist.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add -A
 git commit -m "chore: scaffold Vite project with PWA config and design tokens
 
 Sets base to /quran_api/ so GitHub Pages serves assets from the
-subpath. Workbox applies NetworkFirst to navigations, StaleWhileRevalidate
-to mp3quran JSON, and CacheFirst to hashed assets; no route matches
-audio URLs so media stays NetworkOnly. Removes the 15.5MB image
-directory and the normalize.css/main.css/main.js trio."
+subpath. Navigations are NetworkFirst with a 3s timeout so a fresh shell
+is picked up after a deploy; hashed assets are CacheFirst; mp3quran JSON
+is StaleWhileRevalidate with a case-insensitive .mp3 exclusion so surah
+audio is never cached and range-based seeking keeps working.
+navigateFallback is pinned to null because the plugin defaults it to
+index.html, which would register a NavigationRoute ahead of
+runtimeCaching and shadow the pages route. includeManifestIcons is false
+because globPatterns already precaches the icons. upload-pages-artifact
+v5 needs include-hidden-files or it drops dist/.nojekyll. Removes the
+15.5MB image directory and the normalize.css/main.css/main.js trio."
 ```
 
 ---
@@ -458,21 +553,22 @@ directory and the normalize.css/main.css/main.js trio."
 ## Task 2: Pure Logic (TDD)
 
 **Files:**
-- Create: `src/utils/arabic.js`, `src/audio/queue.js`, `src/utils/favorites.js`
-- Create: `test/arabic.test.js`, `test/queue.test.js`, `test/favorites.test.js`
+- Create: `src/utils/arabic.js`, `src/audio/queue.js`, `src/utils/favorites.js`, `src/utils/ayah-counts.js`
+- Create: `test/arabic.test.js`, `test/queue.test.js`, `test/favorites.test.js`, `test/ayah-counts.test.js`
 
 **Interfaces:**
 - Produces: `normalize(text: string): string`
-- Produces: `createQueue()` → `{ setPlaylist, setIndexBySurah, current, next, prev, size, index }`
-- Produces: `favoriteKey(surahId, moshafId): string`, `isFavorite(list, surahId, moshafId): boolean`, `toggleFavorite(list, entry): array`, `sortForPlayback(list): array`
+- Produces: `createQueue()` → reads are getters (`size`, `index`, `current`, `items`), actions are methods (`setPlaylist`, `setIndexBySurah`, `next`, `prev`, `clear`)
+- Produces: `favoriteKey(surahId, moshafId): string`, `isFavorite(list, surahId, moshafId): boolean`, `toggleFavorite(list, entry): array`, `sortForPlayback(list): array`. Note `removeFavorite` was dropped as unreachable: Task 6 removes a favorite via `toggleFavorite`.
+- Produces: `AYAH_COUNTS` — frozen null-prototype object keyed by surah id 1..114, plus `ayahCount(surahId): number` returning 0 for anything else
 
-All three modules are DOM-free and import nothing.
+All four modules are DOM-free and import nothing.
 
 - [ ] **Step 1: Write `test/arabic.test.js`**
 
 ```js
 import { describe, it, expect } from 'vitest';
-import { normalize } from '../src/utils/arabic.js';
+import { normalize, matchesAll } from '../src/utils/arabic.js';
 
 describe('normalize', () => {
   it('folds alef variants onto bare alef', () => {
@@ -495,6 +591,19 @@ describe('normalize', () => {
     expect(normalize('سؤال')).toBe('سوال');
   });
 
+  it('drops a standalone hamza', () => {
+    // A real reciter name in the live corpus carries one, inside
+    // "قراءة يعقوب الحضرمي بروايتي رويس وروح".
+    expect(normalize('قراءة')).toBe('قراه');
+  });
+
+  it('normalizes non-strings without swallowing them', () => {
+    expect(normalize(0)).toBe('0');
+    expect(normalize(18)).toBe('18');
+    expect(normalize(null)).toBe('');
+    expect(normalize(undefined)).toBe('');
+  });
+
   it('converts Arabic-Indic digits and lowercases latin', () => {
     expect(normalize('سورة ١٨')).toBe('سوره 18');
     expect(normalize('AlKahf')).toBe('alkahf');
@@ -513,6 +622,42 @@ describe('normalize', () => {
   it('handles empty input', () => {
     expect(normalize('')).toBe('');
     expect(normalize('   ')).toBe('');
+  });
+});
+
+describe('matchesAll', () => {
+  // This is the function search actually calls, so it needs coverage of its
+  // own: normalize() being correct does not prove matching is correct.
+  it('folds the query, not just the haystack', () => {
+    // Every natural query a user types is UNFOLDED. If normalize(query) were
+    // dropped, all of these would return false and search would silently break
+    // for every real input while a suite using pre-folded queries stayed green.
+    expect(matchesAll('احمد العجمي', 'أحمد')).toBe(true);
+    expect(matchesAll('محمد إبراهيم الحضرمي', 'إبراهيم')).toBe(true);
+    expect(matchesAll('أبو بكر الشاطري', 'ابو بكر')).toBe(true);
+    expect(matchesAll('فاطمة', 'فاطمة')).toBe(true);
+    expect(matchesAll('مؤمن', 'مؤمن')).toBe(true);
+  });
+
+  it('folds both sides identically', () => {
+    expect(matchesAll('أحمد العجمي', 'احمد')).toBe(true);
+    expect(matchesAll('احمد العجمي', 'أحمد')).toBe(true);
+  });
+
+  it('requires every token to match', () => {
+    expect(matchesAll('أحمد بن علي العجمي', 'احمد')).toBe(true);
+    expect(matchesAll('أحمد بن علي العجمي', 'احمد عجمي')).toBe(true);
+    expect(matchesAll('أحمد بن علي العجمي', 'احمد sudais')).toBe(false);
+    expect(matchesAll('عبد الرحمن السديس', 'السديس عبد')).toBe(true);
+  });
+
+  it('treats an empty query as a match', () => {
+    expect(matchesAll('الحصري', '')).toBe(true);
+    expect(matchesAll('الحصري', '   ')).toBe(true);
+  });
+
+  it('rejects a token absent from the haystack', () => {
+    expect(matchesAll('محمد', 'احمد')).toBe(false);
   });
 });
 ```
@@ -536,7 +681,7 @@ const ARABIC_INDIC = /[\u0660-\u0669]/g;
 const WHITESPACE = /\s+/g;
 
 export function normalize(text) {
-  if (!text) return '';
+  if (text === null || text === undefined) return '';
   return String(text)
     .replace(TASHKEEL, '')
     .replace(ALEF, '\u0627')
@@ -552,7 +697,8 @@ export function normalize(text) {
 }
 
 export function matchesAll(haystack, query) {
-  const tokens = normalize(query).split(' ').filter(Boolean);
+  const normalizedQuery = normalize(query);
+  const tokens = normalizedQuery ? normalizedQuery.split(' ') : [];
   if (tokens.length === 0) return true;
   const text = normalize(haystack);
   return tokens.every((t) => text.includes(t));
@@ -576,13 +722,13 @@ describe('createQueue', () => {
   it('starts empty', () => {
     const q = createQueue();
     expect(q.size).toBe(0);
-    expect(q.current()).toBeNull();
+    expect(q.current).toBeNull();
   });
 
   it('navigates forward and backward', () => {
     const q = createQueue();
     q.setPlaylist([item(1), item(2), item(3)]);
-    expect(q.current().surahId).toBe(1);
+    expect(q.current.surahId).toBe(1);
     expect(q.next().surahId).toBe(2);
     expect(q.next().surahId).toBe(3);
     expect(q.next()).toBeNull();
@@ -593,7 +739,7 @@ describe('createQueue', () => {
     const q = createQueue();
     q.setPlaylist([item(1), item(2)]);
     expect(q.prev()).toBeNull();
-    expect(q.index()).toBe(0);
+    expect(q.index).toBe(0);
   });
 
   it('honours a partial surah_list from the selected moshaf', () => {
@@ -609,22 +755,71 @@ describe('createQueue', () => {
     q.setPlaylist([item(1), item(2)]);
     q.next();
     q.setPlaylist([item(9)]);
-    expect(q.index()).toBe(0);
-    expect(q.current().surahId).toBe(9);
+    expect(q.index).toBe(0);
+    expect(q.current.surahId).toBe(9);
   });
 
   it('locates an index by surah id', () => {
     const q = createQueue();
     q.setPlaylist([item(1), item(18), item(36)]);
     expect(q.setIndexBySurah(18)).toBe(1);
-    expect(q.current().surahId).toBe(18);
+    expect(q.current.surahId).toBe(18);
   });
 
   it('returns -1 for a surah outside the playlist', () => {
     const q = createQueue();
     q.setPlaylist([item(1)]);
     expect(q.setIndexBySurah(99)).toBe(-1);
-    expect(q.index()).toBe(0);
+    expect(q.index).toBe(0);
+  });
+
+  it('copies the playlist instead of aliasing the caller array', () => {
+    const source = [item(1), item(2)];
+    const q = createQueue();
+    q.setPlaylist(source);
+    source.push(item(3));
+    expect(q.size).toBe(2);
+  });
+
+  it('copies on read so a caller cannot mutate the queue through items', () => {
+    const q = createQueue();
+    q.setPlaylist([item(1), item(2)]);
+    const got = q.items;
+    got.push(item(99));
+    expect(q.size).toBe(2);
+    expect(q.items).toHaveLength(2);
+  });
+
+  it('coerces a string surah id', () => {
+    const q = createQueue();
+    q.setPlaylist([item(1), item(18)]);
+    expect(q.setIndexBySurah('18')).toBe(1);
+  });
+
+  it('coerces string ids coming from the playlist itself', () => {
+    const q = createQueue();
+    q.setPlaylist([{ surahId: '1', url: '/x/1.mp3' }, { surahId: '2', url: '/x/2.mp3' }]);
+    expect(q.setIndexBySurah(2)).toBe(1);
+    expect(q.current.url).toBe('/x/2.mp3');
+  });
+
+  it('clears back to an empty queue', () => {
+    const q = createQueue();
+    q.setPlaylist([item(1), item(2)]);
+    q.next();
+    q.clear();
+    expect(q.size).toBe(0);
+    expect(q.index).toBe(0);
+    expect(q.current).toBeNull();
+    expect(q.next()).toBeNull();
+    expect(q.prev()).toBeNull();
+  });
+
+  it('degrades to empty when handed a non-array', () => {
+    const q = createQueue();
+    q.setPlaylist('not an array');
+    expect(q.size).toBe(0);
+    expect(q.current).toBeNull();
   });
 });
 ```
@@ -641,17 +836,10 @@ export function createQueue() {
   let items = [];
   let at = 0;
 
-  const clamp = () => {
-    if (items.length === 0) { at = 0; return; }
-    if (at < 0) at = 0;
-    if (at >= items.length) at = items.length - 1;
-  };
-
   return {
     setPlaylist(list) {
       items = Array.isArray(list) ? list.slice() : [];
       at = 0;
-      clamp();
     },
     setIndexBySurah(surahId) {
       const found = items.findIndex((i) => Number(i.surahId) === Number(surahId));
@@ -659,7 +847,12 @@ export function createQueue() {
       at = found;
       return at;
     },
-    current() { return items.length ? items[at] : null; },
+    // Reads are getters and actions are methods. Mixing the two made `size` a
+    // property while `index` stayed a method, which is a call-site trap.
+    get size() { return items.length; },
+    get index() { return at; },
+    get current() { return items.length ? items[at] : null; },
+    get items() { return items.slice(); },
     next() {
       if (at >= items.length - 1) return null;
       at += 1;
@@ -670,9 +863,6 @@ export function createQueue() {
       at -= 1;
       return items[at];
     },
-    index() { return at; },
-    size() { return items.length; },
-    items() { return items.slice(); },
     clear() { items = []; at = 0; },
   };
 }
@@ -695,6 +885,11 @@ const entry = (surahId, moshafId, reciter = 'الحصري') => ({
 describe('favoriteKey', () => {
   it('composes surah and moshaf ids', () => {
     expect(favoriteKey(18, 133)).toBe('18:133');
+  });
+
+  it('coerces ids so a stored string matches the API number', () => {
+    expect(favoriteKey('18', '133')).toBe('18:133');
+    expect(favoriteKey(' 18 ', 133)).toBe('18:133');
   });
 });
 
@@ -738,6 +933,11 @@ describe('sortForPlayback', () => {
     expect(sortForPlayback(list).map((f) => f.surahId)).toEqual([2, 18, 36]);
   });
 
+  it('breaks a same-surah tie by moshaf id', () => {
+    const list = [entry(18, 133), entry(18, 1), entry(2, 9)];
+    expect(sortForPlayback(list).map((f) => f.moshafId)).toEqual([9, 1, 133]);
+  });
+
   it('does not mutate the input', () => {
     const list = [entry(18, 1), entry(2, 1)];
     sortForPlayback(list);
@@ -750,7 +950,9 @@ describe('sortForPlayback', () => {
 
 ```js
 export function favoriteKey(surahId, moshafId) {
-  return `${surahId}:${moshafId}`;
+  // Coerced so a key built from a string id read out of storage still matches
+  // one built from the numeric id the API returns.
+  return `${Number(surahId)}:${Number(moshafId)}`;
 }
 
 export function isFavorite(list, surahId, moshafId) {
@@ -765,31 +967,134 @@ export function toggleFavorite(list, entry) {
   return [...list, { ...entry, addedAt: Date.now() }];
 }
 
+/**
+ * Two favorites of the same surah by different reciters are a supported shape,
+ * so moshafId breaks the tie. Without it the comparator is not total and the
+ * order falls to Array#sort stability rather than to a rule.
+ */
 export function sortForPlayback(list) {
-  return [...list].sort((a, b) => Number(a.surahId) - Number(b.surahId));
-}
-
-export function removeFavorite(list, surahId, moshafId) {
-  const key = favoriteKey(surahId, moshafId);
-  return list.filter((f) => favoriteKey(f.surahId, f.moshafId) !== key);
+  return [...list].sort((a, b) =>
+    Number(a.surahId) - Number(b.surahId) || Number(a.moshafId) - Number(b.moshafId));
 }
 ```
 
-- [ ] **Step 10: Run all tests**
+- [ ] **Step 10: Create `src/utils/ayah-counts.js`**
+
+The mp3quran `suwar` endpoint returns no ayah count. Rather than add a second
+network dependency for 114 immutable integers, ship them as a table. Counts were
+cross-checked against the canonical total of 6236 ayat.
+
+```js
+/**
+ * Ayah count per surah id. mp3quran's `suwar` endpoint has no ayah count field,
+ * and these are immutable reference data, so a table beats a second runtime
+ * dependency.
+ *
+ * Written as an explicit id: value map, NOT a positional array: an earlier
+ * draft used a bare array and silently omitted surah 5, which shifted every
+ * surah from 5 onward. Keying by id makes that class of error impossible.
+ *
+ * Built on a null prototype so an id like 'constructor' cannot resolve to an
+ * inherited Object.prototype member.
+ *
+ * Verified against two independent live sources that agree exactly, and against
+ * the canonical total of 6236 ayat: 114 keys, surah 1=7, surah 5=120,
+ * surah 18=110, surah 114=6.
+ */
+const COUNTS = {
+  1: 7, 2: 286, 3: 200, 4: 176, 5: 120, 6: 165, 7: 206, 8: 75, 9: 129, 10: 109,
+  11: 123, 12: 111, 13: 43, 14: 52, 15: 99, 16: 128, 17: 111, 18: 110, 19: 98, 20: 135,
+  21: 112, 22: 78, 23: 118, 24: 64, 25: 77, 26: 227, 27: 93, 28: 88, 29: 69, 30: 60,
+  31: 34, 32: 30, 33: 73, 34: 54, 35: 45, 36: 83, 37: 182, 38: 88, 39: 75, 40: 85,
+  41: 54, 42: 53, 43: 89, 44: 59, 45: 37, 46: 35, 47: 38, 48: 29, 49: 18, 50: 45,
+  51: 60, 52: 49, 53: 62, 54: 55, 55: 78, 56: 96, 57: 29, 58: 22, 59: 24, 60: 13,
+  61: 14, 62: 11, 63: 11, 64: 18, 65: 12, 66: 12, 67: 30, 68: 52, 69: 52, 70: 44,
+  71: 28, 72: 28, 73: 20, 74: 56, 75: 40, 76: 31, 77: 50, 78: 40, 79: 46, 80: 42,
+  81: 29, 82: 19, 83: 36, 84: 25, 85: 22, 86: 17, 87: 19, 88: 26, 89: 30, 90: 20,
+  91: 15, 92: 21, 93: 11, 94: 8, 95: 8, 96: 19, 97: 5, 98: 8, 99: 8, 100: 11,
+  101: 11, 102: 8, 103: 3, 104: 9, 105: 5, 106: 4, 107: 7, 108: 3, 109: 6, 110: 3,
+  111: 5, 112: 4, 113: 5, 114: 6,
+};
+
+export const AYAH_COUNTS = Object.freeze(Object.assign(Object.create(null), COUNTS));
+
+export function ayahCount(surahId) {
+  const value = AYAH_COUNTS[surahId];
+  return typeof value === 'number' ? value : 0;
+}
+```
+
+- [ ] **Step 11: Write `test/ayah-counts.test.js`**
+
+```js
+import { describe, it, expect } from 'vitest';
+import { AYAH_COUNTS, ayahCount } from '../src/utils/ayah-counts.js';
+
+describe('AYAH_COUNTS', () => {
+  it('covers all 114 surahs', () => {
+    expect(Object.keys(AYAH_COUNTS)).toHaveLength(114);
+  });
+
+  it('sums to the canonical total of 6236 ayat', () => {
+    const total = Object.values(AYAH_COUNTS).reduce((a, b) => a + b, 0);
+    expect(total).toBe(6236);
+  });
+
+  it('has known values for landmark surahs', () => {
+    expect(ayahCount(1)).toBe(7);
+    expect(ayahCount(2)).toBe(286);
+    expect(ayahCount(18)).toBe(110);
+    expect(ayahCount(114)).toBe(6);
+  });
+
+  it('has surah 5 at 120, the value an earlier draft dropped', () => {
+    expect(ayahCount(5)).toBe(120);
+  });
+
+  it('never returns zero for a real surah', () => {
+    for (let id = 1; id <= 114; id += 1) expect(ayahCount(id)).toBeGreaterThan(0);
+  });
+
+  it('returns 0 for an unknown surah', () => {
+    expect(ayahCount(0)).toBe(0);
+    expect(ayahCount(115)).toBe(0);
+  });
+
+  it('does not resolve inherited Object.prototype keys', () => {
+    expect(ayahCount('constructor')).toBe(0);
+    expect(ayahCount('toString')).toBe(0);
+    expect(ayahCount('__proto__')).toBe(0);
+    expect(ayahCount('hasOwnProperty')).toBe(0);
+  });
+
+  it('has no null-prototype to inherit from', () => {
+    expect(Object.getPrototypeOf(AYAH_COUNTS)).toBeNull();
+  });
+
+  it('is frozen so no module can mutate the table', () => {
+    expect(Object.isFrozen(AYAH_COUNTS)).toBe(true);
+  });
+});
+```
+
+- [ ] **Step 12: Run all tests**
 
 Run: `npm test`
-Expected: 3 files, 22 tests, all passing.
+Expected: 4 files pass and the command exits 0. Assert exit code, not a literal
+test count — the counts above are illustrative.
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 13: Commit**
 
 ```bash
-git add src/utils/arabic.js src/audio/queue.js src/utils/favorites.js test/
-git commit -m "feat: add pure Arabic normalization, queue, and favorites logic
+git add src/utils/arabic.js src/audio/queue.js src/utils/favorites.js src/utils/ayah-counts.js test/
+git commit -m "feat: add pure Arabic normalization, queue, favorites, and ayah counts
 
 Arabic folding matters for search: without it the query 'احمد' never
 matches 'أحمد' and 'فاطمه' never matches 'فاطمة'. Favorites key on
 surahId:moshafId because moshaf.id is globally unique across all 287
-entries, so the same surah by two reciters stays two records."
+entries, so the same surah by two reciters stays two records. Ayah counts
+are a frozen table because mp3quran's suwar endpoint omits them and 114
+immutable integers do not justify a second runtime dependency."
 ```
 
 ---
@@ -798,12 +1103,13 @@ entries, so the same surah by two reciters stays two records."
 
 **Files:**
 - Create: `src/api/client.js`, `src/api/quran.js`, `src/state/store.js`, `src/state/persist.js`
+- Create: `test/client.test.js`, `test/quran.test.js`, `test/store.test.js`, `test/persist.test.js`, `scripts/verify-api.mjs`
 
 **Interfaces:**
-- Produces: `getJSON(path, { signal, timeoutMs }): Promise<any>`
+- Produces: `getJSON(path, { signal, timeoutMs, retries }): Promise<any>`, `ApiError` with `.status`
 - Produces: `getReciters()`, `getSuwar()`, `getRiwayat()`, `getRadios()`, `deriveStyle(moshafName)`, `surahUrl(server, surahId)`, `buildPlaylist(moshaf, suwarById)`
 - Produces: `createStore(initial)` → `{ getState, setState, subscribe }`
-- Produces: `readState()`, `writeState(patch)`, `CACHE_TTL_MS`
+- Produces: `readState()`, `writeState(patch)`, `readCache(key)`, `writeCache(key, data)`, `CACHE_TTL_MS`
 
 - [ ] **Step 1: Create `src/api/client.js`**
 
@@ -812,14 +1118,57 @@ const BASE = 'https://mp3quran.net/api/v3';
 const DEFAULT_TIMEOUT = 3000;
 
 export class ApiError extends Error {
-  constructor(message, cause) {
+  constructor(message, cause, status) {
     super(message);
     this.name = 'ApiError';
     this.cause = cause;
+    // status 0 means the request never produced a response (offline, DNS,
+    // timeout); 4xx/5xx carry the real code so callers can tell a bad path
+    // from a dead server.
+    this.status = status ?? 0;
   }
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** A 4xx is deterministic, so replaying it only spends 400ms to reach the same answer. */
+function isRetryable(err) {
+  return !(err instanceof ApiError) || err.status === 0 || err.status >= 500;
+}
+
+/**
+ * The Arabic copy is the only user-facing text this layer produces, so every
+ * failure path must map to it — including HTTP statuses. Rethrowing the raw
+ * `HTTP 404` would surface English in an Arabic interface.
+ *
+ * A 4xx means the request REACHED the server and was rejected, so telling the
+ * user to check their internet connection would be actively misleading — that
+ * message belongs only to the paths where no response arrived at all.
+ *
+ * `navigator` is absent outside browsers, so it is guarded: a ReferenceError
+ * here would replace the Arabic message with an opaque crash.
+ *
+ * Exported so its per-status mapping can be asserted directly. Testing only
+ * "the message contains Arabic" cannot catch two statuses sharing copy, or an
+ * arm widened so that 4xx falls into the 5xx branch.
+ */
+export function messageFor(err) {
+  if (!(err instanceof ApiError)) {
+    return typeof navigator !== 'undefined' && navigator.onLine === false
+      ? 'لا يوجد اتصال بالإنترنت. البيانات المحفوظة متاحة.'
+      : 'تعذّر جلب البيانات. تحقق من الاتصال وحاول مجدداً.';
+  }
+  // Range arms are ordered >= 500 BEFORE >= 400: 500 satisfies both, so putting
+  // >= 400 first would make the server-error arm unreachable and hand 5xx the
+  // invalid-request copy.
+  if (err.status === 404) return 'تعذّر العثور على البيانات المطلوبة.';
+  if (err.status === 401 || err.status === 403) return 'لا صلاحية للوصول إلى هذه البيانات.';
+  if (err.status === 429) return 'تم تجاوز عدد الطلبات المسموح. حاول بعد قليل.';
+  if (err.status === 408) return 'انتهت مهلة الطلب. حاول مجدداً.';
+  if (err.status >= 500) return 'الخادم غير متاح الآن. حاول بعد قليل.';
+  if (err.status >= 400) return 'طلب غير صالح. حدِّث الصفحة وحاول مجدداً.';
+  return 'تعذّر جلب البيانات. تحقق من الاتصال وحاول مجدداً.';
+}
 
 export async function getJSON(path, { signal, timeoutMs = DEFAULT_TIMEOUT, retries = 1 } = {}) {
   let lastError;
@@ -837,11 +1186,14 @@ export async function getJSON(path, { signal, timeoutMs = DEFAULT_TIMEOUT, retri
         signal: controller.signal,
         headers: { Accept: 'application/json' },
       });
-      if (!res.ok) throw new ApiError(`HTTP ${res.status}`);
+      if (!res.ok) throw new ApiError(`HTTP ${res.status}`, undefined, res.status);
       return await res.json();
     } catch (err) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       lastError = err;
+      // break, not a skipped sleep: the loop condition alone would still spend
+      // another round trip reaching the same answer.
+      if (!isRetryable(err)) break;
       if (attempt < retries) await sleep(400);
     } finally {
       clearTimeout(timer);
@@ -849,11 +1201,7 @@ export async function getJSON(path, { signal, timeoutMs = DEFAULT_TIMEOUT, retri
     }
   }
 
-  if (lastError instanceof ApiError) throw lastError;
-  if (!navigator.onLine) {
-    throw new ApiError('لا يوجد اتصال بالإنترنت. البيانات المحفوظة متاحة.', lastError);
-  }
-  throw new ApiError('تعذّر جلب البيانات. تحقق من الاتصال وحاول مجدداً.', lastError);
+  throw new ApiError(messageFor(lastError), lastError, lastError?.status ?? 0);
 }
 ```
 
@@ -868,15 +1216,18 @@ import { getJSON } from './client.js';
  */
 export function deriveStyle(moshafName) {
   const n = moshafName || '';
-  if (n.includes('المجود')) return 'مجوّد';
-  if (n.includes('المعلم')) return 'مُعلِّم';
+  if (n.includes('معلم')) return 'مُعلِّم';
   if (n.includes('مرتل')) return 'مرتّل';
   if (n.includes('مجود')) return 'مجوّد';
+  if (n.includes('مميزة')) return 'مميّزة';
   return '';
 }
 
 export async function getReciters(signal) {
-  const data = await getJSON('/reciters?language=ar', { signal, timeoutMs: 6000 });
+  // retries: 0 — this is the 191KB payload with a 6s per-attempt timeout, so a
+  // retry would push the worst case to ~12.4s of silence. The 24h cache means
+  // this rarely runs at all, and cached data renders first regardless.
+  const data = await getJSON('/reciters?language=ar', { signal, timeoutMs: 6000, retries: 0 });
   return (data.reciters || []).map((r) => ({
     id: r.id,
     name: r.name,
@@ -897,12 +1248,15 @@ export async function getReciters(signal) {
 
 export async function getSuwar(signal) {
   const data = await getJSON('/suwar?language=ar', { signal });
+  // Verified field names: id, name, start_page, end_page, makkia, type.
+  // makkia is 1 for Meccan / 0 for Medinan. `type` is its exact inverse, so
+  // it is ignored. The endpoint carries no ayah count — see utils/ayah-counts.js.
   return (data.suwar || []).map((s) => ({
     id: Number(s.id),
     name: s.name,
-    makyi: s.makyi,
-    pageStart: s.page_start,
-    pageEnd: s.page_end,
+    isMeccan: Number(s.makkia) === 1,
+    pageStart: Number(s.start_page),
+    pageEnd: Number(s.end_page),
   }));
 }
 
@@ -922,8 +1276,11 @@ export function surahUrl(server, surahId) {
 
 /** Playlist is built from the moshaf's own surah_list, never the global list. */
 export function buildPlaylist(moshaf, suwarById) {
+  // `?? []` so a moshaf arriving from an older cache without surahList yields an
+  // empty playlist rather than a TypeError on `.map`. Filtering is NOT done
+  // here — getReciters owns validation of surah_list.
   if (!moshaf) return [];
-  return moshaf.surahList
+  return (moshaf.surahList ?? [])
     .map((id) => {
       const meta = suwarById.get(id);
       return {
@@ -931,8 +1288,7 @@ export function buildPlaylist(moshaf, suwarById) {
         title: meta?.name || `سورة ${id}`,
         url: surahUrl(moshaf.server, id),
       };
-    })
-    .filter(Boolean);
+    });
 }
 ```
 
@@ -950,12 +1306,26 @@ export function createStore(initial) {
     const keys = pendingKeys;
     pendingKeys = new Set();
     const snapshot = state;
-    for (const fn of listeners) fn(snapshot, keys);
+    // Each listener is isolated: one view throwing must not starve the views
+    // registered after it, nor let the error escape as an uncaught exception
+    // from inside the microtask.
+    for (const fn of listeners) {
+      try {
+        fn(snapshot, keys);
+      } catch (err) {
+        console.error('store listener failed', err);
+      }
+    }
   };
 
   return {
     getState() { return state; },
     setState(patch) {
+      // Compared with Object.is, not ===, so a NaN -> NaN write counts as
+      // unchanged too. Only genuinely changed keys are announced: a view that
+      // writes a value it already holds should not cause a render.
+      const changed = Object.keys(patch).filter((k) => !Object.is(state[k], patch[k]));
+      if (changed.length === 0) return;
       state = { ...state, ...patch };
       pendingKeys = new Set([...pendingKeys, ...Object.keys(patch)]);
       if (!queued) {
@@ -964,8 +1334,16 @@ export function createStore(initial) {
       }
     },
     subscribe(fn, { immediate = false } = {}) {
+      if (immediate) {
+        // Notify first: if fn throws, the listener was never registered, so
+        // subscribe still returns a working unsubscribe.
+        try {
+          fn(state, new Set(Object.keys(state)));
+        } catch (err) {
+          console.error('store immediate subscribe failed', err);
+        }
+      }
       listeners.add(fn);
-      if (immediate) fn(state, new Set(Object.keys(state)));
       return () => listeners.delete(fn);
     },
   };
@@ -980,6 +1358,12 @@ Batching through `queueMicrotask` keeps a multi-key update from triggering sever
 const KEY = 'quran.state.v2';
 const KEY_CACHE = 'quran.cache.v2';
 export const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+// Every localStorage access below is guarded. Storage can be disabled outright
+// (Safari private mode, third-party-cookie blocking) or throw on write when the
+// quota is full, and a throw during bootstrap would leave the user staring at a
+// blank page — so a failed read degrades to defaults and a failed write is lost
+// silently, keeping the session in memory.
 
 export function readState() {
   try {
@@ -1002,7 +1386,10 @@ export function writeState(patch) {
 export function readCache(key) {
   try {
     const entry = JSON.parse(localStorage.getItem(KEY_CACHE) || '{}')[key];
-    if (!entry) return null;
+    // `!Number.isFinite(at)` rejects an entry written without a usable
+    // timestamp: `NaN > TTL` is false, so such an entry would never expire.
+    if (!entry || typeof entry !== 'object') return null;
+    if (!Number.isFinite(entry.at)) return null;
     if (Date.now() - entry.at > CACHE_TTL_MS) return null;
     return entry.data;
   } catch {
@@ -1026,7 +1413,17 @@ export function writeCache(key, data) {
 Create `scripts/verify-api.mjs`:
 
 ```js
-import { getReciters, getSuwar, getRiwayat, getRadios, buildPlaylist } from '../src/api/quran.js';
+/**
+ * Live survey of the data layer, run before the UI work so field-name and
+ * classification mistakes surface here rather than in a component. Not shipped
+ * and not part of the build.
+ *
+ * Every count below is ENFORCED with a throw, not merely printed. A printed
+ * MISMATCH with exit 0 is worse than no check: the workflow would go green
+ * while the data layer silently changed shape. These are facts about the
+ * upstream API, not preferences — if one fails, report it, do not edit it.
+ */
+import { getReciters, getSuwar, getRiwayat, getRadios, buildPlaylist, deriveStyle } from '../src/api/quran.js';
 
 const reciters = await getReciters();
 const suwar = await getSuwar();
@@ -1037,32 +1434,593 @@ const moshafCount = reciters.reduce((n, r) => n + r.moshaf.length, 0);
 const ids = reciters.flatMap((r) => r.moshaf.map((m) => m.id));
 const unique = new Set(ids);
 
-console.log('reciters        :', reciters.length, reciters.length === 241 ? 'OK' : 'MISMATCH');
-console.log('moshaf          :', moshafCount, moshafCount === 287 ? 'OK' : 'MISMATCH');
-console.log('unique moshaf id:', unique.size, unique.size === moshafCount ? 'OK (globally unique)' : 'COLLISION');
-console.log('suwar           :', suwar.length, suwar.length === 114 ? 'OK' : 'MISMATCH');
-console.log('riwayat         :', riwayat.length, riwayat.length === 20 ? 'OK' : 'MISMATCH');
-console.log('radios          :', radios.length);
-console.log('styles seen     :', [...new Set(reciters.flatMap((r) => r.moshaf.map((m) => m.style)))].join(' | '));
+const expect = (label, actual, wanted) => {
+  const ok = actual === wanted;
+  console.log(`${label.padEnd(17)}:`, actual, ok ? 'OK' : `MISMATCH (expected ${wanted})`);
+  if (!ok) throw new Error(`${label}: got ${actual}, expected ${wanted}`);
+};
 
-const byId = new Map(surah.map((s) => [s.id, s]));
+expect('reciters', reciters.length, 241);
+expect('moshaf', moshafCount, 287);
+// The whole favorites key is `${surahId}:${moshafId}`, so this invariant is
+// load-bearing: a collision would silently merge two reciters' entries.
+expect('unique moshaf id', unique.size, moshafCount);
+expect('suwar', suwar.length, 114);
+expect('riwayat', riwayat.length, 20);
+expect('radios', radios.length, 177);
+expect('meccan suwar', suwar.filter((s) => s.isMeccan).length, 86);
+
+// Every radio URL must be a plain audio stream the <audio> element can take
+// directly. deriveStyle is called here rather than trusted from the precomputed
+// m.style, so the harness actually exercises the classifier.
+if (radios.some((r) => !r.url)) throw new Error('a radio entry has no url');
+
+const styles = new Set(reciters.flatMap((r) => r.moshaf.map((m) => deriveStyle(m.name))));
+for (const required of ['مرتّل', 'مجوّد', 'مميّزة'])
+  if (!styles.has(required)) throw new Error(`deriveStyle lost the ${required} branch`);
+console.log('styles seen     :', [...styles].join(' | '));
+
+// Checked after the required branches so a deleted branch reports the specific
+// loss rather than the generic count. Only one live moshaf has no style word
+// (a 1387 AH historical recording), where '' is correct.
+const unstyled = reciters.flatMap((r) => r.moshaf)
+  .filter((m) => deriveStyle(m.name) === '');
+console.log('unstyled moshaf :', unstyled.length, '→', unstyled.map((m) => m.name).join(' | '));
+if (unstyled.length !== 1) throw new Error(`${unstyled.length} unstyled moshaf; extend deriveStyle`);
+
+// makkia must be read, not type: they are exact inverses, so reading the wrong
+// one inverts Meccan and Medinan for all 114 surahs.
+expect('medinan suwar', suwar.filter((s) => !s.isMeccan).length, 28);
+
+const byId = new Map(suwar.map((s) => [s.id, s]));
 const maaher = reciters.find((r) => r.moshaf.some((m) => m.surahTotal === 38));
+if (!maaher) throw new Error('expected a reciter with a 38-surah moshaf');
 const partial = maaher.moshaf.find((m) => m.surahTotal === 38);
-console.log('partial playlist:', maaher.name, '->', buildPlaylist(partial, byId).length, 'surahs');
+const built = buildPlaylist(partial, byId);
+console.log('partial playlist:', maaher.name, '->', built.length, 'surahs');
+if (built.length !== 38) throw new Error(`expected 38 surahs, got ${built.length}`);
+console.log('partial url     :', built[0].title, built[0].url);
+
+// Every built entry must resolve to a real surah and a zero-padded URL, so a
+// dead link can never reach the player.
+for (const entry of built) {
+  if (!byId.has(entry.surahId)) throw new Error(`unknown surah ${entry.surahId}`);
+  if (!/\/\d{3}\.mp3$/.test(entry.url)) throw new Error(`bad url ${entry.url}`);
+}
+console.log('all playlist urls well-formed');
 ```
 
 Run: `node scripts/verify-api.mjs`
-Expected: reciters 241 OK, moshaf 287 OK, unique moshaf id OK, suwar 114 OK, riwayat 20 OK, and a non-zero styles list including مرتّل and مجوّد.
+Expected: reciters 241 OK, moshaf 287 OK, unique moshaf id OK, suwar 114 OK, riwayat 20 OK, radios 177 OK, `styles seen` containing مرتّل and مجوّد and مُعلِّم and مميّزة, `unstyled moshaf : 1`, and `all playlist urls well-formed`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Write `test/client.test.js`**
+
+`messageFor` is the only user-facing text this layer produces, and three of its five branches cannot be reached against the live API. `fetch` is replaced per test, so no network is touched.
+
+```js
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { getJSON, ApiError } from '../src/api/client.js';
+
+const original = globalThis.fetch;
+afterEach(() => { globalThis.fetch = original; vi.restoreAllMocks(); });
+
+function stubFetch(response) {
+  const spy = vi.fn().mockResolvedValue(response);
+  globalThis.fetch = spy;
+  return spy;
+}
+
+const withStatus = (status) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  json: async () => ({}),
+});
+
+const ARABIC = /[\u0600-\u06FF]/;
+
+// One entry per status, mapping to the EXACT copy expected. Asserting the
+// exact string is what catches two statuses sharing a message, or an arm
+// widened so 4xx falls into the 5xx branch — both of which a
+// "contains Arabic" assertion waves through.
+const EXPECTED = {
+  400: 'طلب غير صالح. حدِّث الصفحة وحاول مجدداً.',
+  401: 'لا صلاحية للوصول إلى هذه البيانات.',
+  403: 'لا صلاحية للوصول إلى هذه البيانات.',
+  404: 'تعذّر العثور على البيانات المطلوبة.',
+  408: 'انتهت مهلة الطلب. حاول مجدداً.',
+  422: 'طلب غير صالح. حدِّث الصفحة وحاول مجدداً.',
+  429: 'تم تجاوز عدد الطلبات المسموح. حاول بعد قليل.',
+  500: 'الخادم غير متاح الآن. حاول بعد قليل.',
+  503: 'الخادم غير متاح الآن. حاول بعد قليل.',
+};
+
+describe('messageFor', () => {
+  it('maps each status to its own exact copy', () => {
+    for (const [status, message] of Object.entries(EXPECTED)) {
+      expect(messageFor(new ApiError('x', undefined, Number(status)))).toBe(message);
+    }
+  });
+
+  it('never puts the connectivity message on a 4xx', () => {
+    // A 4xx means the server answered and refused; suggesting a connection
+    // check would send the user down the wrong path.
+    for (const status of [400, 401, 403, 404, 408, 422, 429]) {
+      expect(messageFor(new ApiError('x', undefined, status)))
+        .not.toContain('تحقق من الاتصال');
+    }
+  });
+
+  it('gives 404 and 403 different copy', () => {
+    expect(messageFor(new ApiError('x', undefined, 404)))
+      .not.toBe(messageFor(new ApiError('x', undefined, 403)));
+  });
+
+  it('uses the connectivity copy only when no response arrived', () => {
+    expect(messageFor(new TypeError('failed'))).toContain('تحقق من الاتصال');
+    expect(messageFor(new ApiError('x', undefined, 0))).toContain('تحقق من الاتصال');
+  });
+
+  it('returns Arabic for every reachable status', () => {
+    for (const status of Object.keys(EXPECTED)) {
+      expect(messageFor(new ApiError('x', undefined, Number(status)))).toMatch(ARABIC);
+    }
+  });
+});
+
+describe('getJSON', () => {
+  it('reports status 404', async () => {
+    stubFetch(withStatus(404));
+    await expect(getJSON('/nope')).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('reports the exact 404 copy', async () => {
+    stubFetch(withStatus(404));
+    await expect(getJSON('/nope')).rejects.toThrow('تعذّر العثور على البيانات المطلوبة.');
+  });
+
+  it('never leaks the literal HTTP to the user', async () => {
+    for (const status of Object.keys(EXPECTED)) {
+      stubFetch(withStatus(Number(status)));
+      await expect(getJSON(`/x/${status}`)).rejects.toSatisfy(
+        (e) => ARABIC.test(e.message) && !e.message.includes('HTTP'),
+      );
+    }
+  });
+
+  it('does not retry a 4xx', async () => {
+    const spy = stubFetch(withStatus(404));
+    await getJSON('/nope').catch(() => {});
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a 5xx exactly once', async () => {
+    const spy = stubFetch(withStatus(503));
+    await getJSON('/boom').catch(() => {});
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns parsed JSON on success', async () => {
+    stubFetch({ ok: true, status: 200, json: async () => ({ ok: 1 }) });
+    await expect(getJSON('/fine')).resolves.toEqual({ ok: 1 });
+  });
+
+  it('reports status 0 for a network failure', async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('failed'));
+    await expect(getJSON('/x', { retries: 0 })).rejects.toMatchObject({ status: 0 });
+  });
+
+  it('surfaces ApiError with a name', async () => {
+    stubFetch(withStatus(404));
+    await expect(getJSON('/nope')).rejects.toBeInstanceOf(ApiError);
+    await expect(getJSON('/nope')).rejects.toHaveProperty('name', 'ApiError');
+  });
+
+  it('distinguishes caller cancellation from failure', async () => {
+    stubFetch(withStatus(404));
+    await expect(getJSON('/nope', { signal: AbortSignal.abort() }))
+      .rejects.toHaveProperty('name', 'AbortError');
+  });
+});
+```
+
+- [ ] **Step 7: Write `test/quran.test.js`**
+
+`deriveStyle` is pure and is the function that would silently mislabel 215 reciters if it drifted, so it gets its own unit coverage against the real names the live API returns.
+
+```js
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { deriveStyle, surahUrl, buildPlaylist, getReciters } from '../src/api/quran.js';
+
+describe('deriveStyle', () => {
+  it('classifies every style present in the live corpus', () => {
+    expect(deriveStyle('حفص عن عاصم - مرتل')).toBe('مرتّل');
+    expect(deriveStyle('المصحف المجود')).toBe('مجوّد');
+    expect(deriveStyle('المصحف المعلم')).toBe('مُعلِّم');
+    expect(deriveStyle('حفص عن عاصم - تلاوة مميزة')).toBe('مميّزة');
+  });
+
+  it('matches مجود without requiring the definite article', () => {
+    // Asserted against the branch's return value, not equality between two
+    // inputs: comparing 'المصحف المجود' to 'مجود' would still pass with the
+    // whole branch deleted, since both would fall through to ''.
+    expect(deriveStyle('مجود')).toBe('مجوّد');
+    expect(deriveStyle('المصحف المجود')).toBe('مجوّد');
+  });
+
+  it('returns empty for a riwaya name with no style word', () => {
+    expect(deriveStyle('حفص عن عاصم - تسجيل عام 1387 هـ - 1967م')).toBe('');
+    expect(deriveStyle('')).toBe('');
+    expect(deriveStyle(undefined)).toBe('');
+  });
+
+  it('ignores surrounding whitespace', () => {
+    expect(deriveStyle('  مرتل  ')).toBe('مرتّل');
+  });
+});
+
+describe('surahUrl', () => {
+  it('zero-pads the surah id to three digits', () => {
+    expect(surahUrl('https://server6.mp3quran.net/akdr/', 1)).toBe('https://server6.mp3quran.net/akdr/001.mp3');
+    expect(surahUrl('https://server6.mp3quran.net/akdr/', 18)).toBe('https://server6.mp3quran.net/akdr/018.mp3');
+    expect(surahUrl('https://server6.mp3quran.net/akdr/', 114)).toBe('https://server6.mp3quran.net/akdr/114.mp3');
+  });
+
+  it('accepts a string id', () => {
+    expect(surahUrl('https://s/', '7')).toBe('https://s/007.mp3');
+  });
+});
+
+describe('buildPlaylist', () => {
+  const suwarById = new Map([
+    [1, { id: 1, name: 'الفاتحة' }],
+    [18, { id: 18, name: 'الكهف' }],
+    [114, { id: 114, name: 'الناس' }],
+  ]);
+
+  it('builds from the moshaf surahList, not the full 114', () => {
+    const moshaf = { server: 'https://s/', surahList: [1, 18] };
+    const list = buildPlaylist(moshaf, suwarById);
+    expect(list.map((x) => x.surahId)).toEqual([1, 18]);
+    expect(list[1]).toEqual({ surahId: 18, title: 'الكهف', url: 'https://s/018.mp3' });
+  });
+
+  it('honours a partial surah_list', () => {
+    const moshaf = { server: 'https://s/', surahList: [18] };
+    expect(buildPlaylist(moshaf, suwarById)).toHaveLength(1);
+  });
+
+  it('falls back to a generic title when metadata is missing', () => {
+    const moshaf = { server: 'https://s/', surahList: [99] };
+    expect(buildPlaylist(moshaf, suwarById)[0].title).toBe('سورة 99');
+  });
+
+  it('returns an empty list when there is no moshaf', () => {
+    expect(buildPlaylist(null, suwarById)).toEqual([]);
+  });
+
+  it('passes surahList through verbatim, in order', () => {
+    // buildPlaylist does NOT filter. It receives an already-parsed list from
+    // getReciters, which owns the validation. See the getReciters suite below
+    // for where the filtering is pinned.
+    const moshaf = { server: 'https://s/', surahList: [114, 1, 18] };
+    expect(buildPlaylist(moshaf, suwarById).map((x) => x.surahId)).toEqual([114, 1, 18]);
+  });
+});
+
+describe('getReciters parsing', () => {
+  // The surah_list filter lives in getReciters, so it is pinned here rather
+  // than by asserting it in buildPlaylist, which does not do it.
+  //
+  // The hooks live in the describe body, never inside a helper called from an
+  // `it`: Vitest silently ignores a beforeEach registered once a test body is
+  // already running, which left these tests reading the live API and passing
+  // for the wrong reason.
+  const original = globalThis.fetch;
+  let payload = null;
+
+  beforeEach(() => {
+    payload = null;
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true, status: 200, json: async () => payload,
+    });
+  });
+  afterEach(() => { globalThis.fetch = original; vi.restoreAllMocks(); });
+
+  const fetchStub = (p) => { payload = p; };
+
+  it('drops non-numeric and out-of-range surah_list entries', async () => {
+    fetchStub({
+      reciters: [{
+        id: 1, name: 'اختبار', letter: 'ا',
+        moshaf: [{ id: 5, name: 'حفص عن عاصم - مرتل', server: 'https://s/', surah_total: '4', surah_list: '0, 1, -3, x, 18,, 114' }],
+      }],
+    });
+    const [r] = await getReciters();
+    expect(r.moshaf[0].surahList).toEqual([1, 18, 114]);
+  });
+
+  it('derives style from the moshaf name, not moshaf_type', async () => {
+    fetchStub({
+      reciters: [{
+        id: 1, name: 'اختبار', letter: 'ا',
+        moshaf: [
+          { id: 5, name: 'حفص عن عاصم - مرتل', server: 'https://s/', surah_total: '114', surah_list: '1', moshaf_type: 11 },
+          { id: 6, name: 'المصحف المجود', server: 'https://s/', surah_total: '114', surah_list: '1', moshaf_type: 222 },
+        ],
+      }],
+    });
+    const [r] = await getReciters();
+    // 11 and 222 are opaque codes, so a numeric classification would be wrong.
+    expect(r.moshaf.map((m) => m.style)).toEqual(['مرتّل', 'مجوّد']);
+  });
+
+  it('tolerates a missing moshaf array', async () => {
+    fetchStub({ reciters: [{ id: 1, name: 'اختبار', letter: 'ا' }] });
+    const [r] = await getReciters();
+    expect(r.moshaf).toEqual([]);
+  });
+});
+```
+
+- [ ] **Step 8: Write `test/store.test.js`**
+
+Two of the task's global constraints rest on this layer: a multi-key patch must render **once**, and persistence must never throw. `localStorage` is faked per test, and `queueMicrotask` is flushed with `await Promise.resolve()`.
+
+```js
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { createStore } from '../src/state/store.js';
+
+// One microtask turn is enough for a queued flush to run.
+const tick = () => Promise.resolve();
+
+describe('createStore', () => {
+  it('notifies once for a multi-key patch, with the merged key set', async () => {
+    const store = createStore({ a: 1, b: 1, c: 1 });
+    const seen = [];
+    store.subscribe((s, keys) => seen.push([...keys]));
+
+    store.setState({ a: 2 });
+    store.setState({ b: 2 });
+    store.setState({ c: 2 });
+    expect(seen).toHaveLength(0);        // nothing synchronous
+    await tick();
+    expect(seen).toEqual([['a', 'b', 'c']]);
+  });
+
+  it('does not notify when no key actually changed', async () => {
+    const store = createStore({ a: 1 });
+    const fn = vi.fn();
+    store.subscribe(fn);
+    store.setState({ a: 1 });
+    await tick();
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('merges repeated writes to the same key', async () => {
+    const store = createStore({ a: 0 });
+    const seen = [];
+    store.subscribe((s, keys) => seen.push([...keys]));
+    store.setState({ a: 1 });
+    store.setState({ a: 2 });
+    await tick();
+    expect(seen).toEqual([['a']]);
+  });
+
+  it('gives every listener the same state snapshot', async () => {
+    const store = createStore({ n: 0 });
+    let first, second;
+    store.subscribe((s) => { first = s; });
+    store.subscribe((s) => { second = s; });
+    store.setState({ n: 1 });
+    await tick();
+    expect(first).toBe(second);
+  });
+
+  it('keeps notifying later listeners when an earlier one throws', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const store = createStore({ n: 0 });
+    const bad = vi.fn(() => { throw new Error('boom'); });
+    const good = vi.fn();
+    store.subscribe(bad);
+    store.subscribe(good);
+    store.setState({ n: 1 });
+    await tick();
+    expect(good).toHaveBeenCalledOnce();
+    expect(bad).toHaveBeenCalledOnce();
+    spy.mockRestore();
+  });
+
+  it('notifies synchronously and once when immediate is set', () => {
+    const store = createStore({ a: 1, b: 2 });
+    const fn = vi.fn();
+    store.subscribe(fn, { immediate: true });
+    expect(fn).toHaveBeenCalledOnce();
+    expect(fn.mock.calls[0][0]).toEqual({ a: 1, b: 2 });
+  });
+
+  it('does not queue a spurious flush from an immediate subscribe', async () => {
+    const store = createStore({ a: 1 });
+    const fn = vi.fn();
+    store.subscribe(fn, { immediate: true });
+    await tick();
+    expect(fn).toHaveBeenCalledOnce();
+  });
+
+  it('still returns an unsubscribe when an immediate callback throws', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const store = createStore({ a: 1 });
+    const off = store.subscribe(() => { throw new Error('boom'); }, { immediate: true });
+    expect(typeof off).toBe('function');
+    off();                                 // must not throw
+    spy.mockRestore();
+  });
+
+  it('stops notifying after unsubscribe', async () => {
+    const store = createStore({ n: 0 });
+    const fn = vi.fn();
+    const off = store.subscribe(fn);
+    store.setState({ n: 1 });
+    await tick();
+    off();
+    store.setState({ n: 2 });
+    await tick();
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('survives a re-entrant setState from a listener', async () => {
+    const store = createStore({ n: 0 });
+    store.subscribe((s) => { if (s.n < 3) store.setState({ n: s.n + 1 }); });
+    store.setState({ n: 1 });
+    await tick();
+    await tick();
+    expect(store.getState().n).toBeGreaterThan(1);
+  });
+
+  it('does not mutate the initial state object', async () => {
+    const initial = { a: 1 };
+    const store = createStore(initial);
+    store.setState({ a: 2 });
+    await tick();
+    expect(initial.a).toBe(1);
+  });
+});
+```
+
+- [ ] **Step 9: Write `test/persist.test.js`**
+
+`localStorage` is faked, including the hostile cases: it throws on every access (private mode / disabled storage), it throws on write (quota), and it returns malformed JSON.
+
+```js
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readState, writeState, readCache, writeCache, CACHE_TTL_MS } from '../src/state/persist.js';
+
+const KEY = 'quran.state.v2';
+const KEY_CACHE = 'quran.cache.v2';
+
+function fakeStorage({ get, set } = {}) {
+  const map = new Map();
+  return {
+    getItem: get ?? ((k) => (map.has(k) ? map.get(k) : null)),
+    setItem: set ?? ((k, v) => map.set(k, v)),
+    _map: map,
+  };
+}
+
+let storage;
+beforeEach(() => {
+  storage = fakeStorage();
+  globalThis.localStorage = storage;
+});
+afterEach(() => { delete globalThis.localStorage; vi.restoreAllMocks(); });
+
+describe('readState / writeState', () => {
+  it('returns an empty object when nothing is stored', () => {
+    expect(readState()).toEqual({});
+  });
+
+  it('round-trips a patch across calls', () => {
+    writeState({ theme: 'dark' });
+    writeState({ volume: 0.5 });
+    expect(readState()).toEqual({ theme: 'dark', volume: 0.5 });
+  });
+
+  it('returns an empty object when the stored value is malformed', () => {
+    storage.setItem(KEY, '{not json');
+    expect(readState()).toEqual({});
+  });
+
+  it('never throws when storage is unavailable', () => {
+    globalThis.localStorage = undefined;
+    expect(() => writeState({ theme: 'dark' })).not.toThrow();
+    expect(readState()).toEqual({});
+  });
+
+  it('never throws when the write exceeds quota', () => {
+    globalThis.localStorage = fakeStorage({
+      set: () => { throw new DOMException('full', 'QuotaExceededError'); },
+    });
+    expect(() => writeState({ theme: 'dark' })).not.toThrow();
+  });
+});
+
+describe('readCache / writeCache', () => {
+  it('returns null for a missing key', () => {
+    expect(readCache('reciters')).toBeNull();
+  });
+
+  it('round-trips a value', () => {
+    writeCache('reciters', [{ id: 1 }]);
+    expect(readCache('reciters')).toEqual([{ id: 1 }]);
+  });
+
+  it('expires an entry older than the TTL', () => {
+    writeCache('reciters', [{ id: 1 }]);
+    const raw = JSON.parse(storage.getItem(KEY_CACHE));
+    raw.reciters.at = Date.now() - CACHE_TTL_MS - 1000;
+    storage.setItem(KEY_CACHE, JSON.stringify(raw));
+    expect(readCache('reciters')).toBeNull();
+  });
+
+  it('keeps an entry inside the TTL', () => {
+    writeCache('reciters', [{ id: 1 }]);
+    const raw = JSON.parse(storage.getItem(KEY_CACHE));
+    raw.reciters.at = Date.now() - 1000;
+    storage.setItem(KEY_CACHE, JSON.stringify(raw));
+    expect(readCache('reciters')).toEqual([{ id: 1 }]);
+  });
+
+  it('rejects an entry with no usable timestamp', () => {
+    // NaN > TTL is false, so without this guard the entry would never expire.
+    storage.setItem(KEY_CACHE, JSON.stringify({ reciters: { data: [1] } }));
+    expect(readCache('reciters')).toBeNull();
+    storage.setItem(KEY_CACHE, JSON.stringify({ reciters: 'not an object' }));
+    expect(readCache('reciters')).toBeNull();
+  });
+
+  it('keeps other keys when one expires', () => {
+    writeCache('reciters', [{ id: 1 }]);
+    writeCache('suwar', [{ id: 1 }]);
+    const raw = JSON.parse(storage.getItem(KEY_CACHE));
+    raw.reciters.at = Date.now() - CACHE_TTL_MS - 1000;
+    storage.setItem(KEY_CACHE, JSON.stringify(raw));
+    expect(readCache('reciters')).toBeNull();
+    expect(readCache('suwar')).toEqual([{ id: 1 }]);
+  });
+
+  it('returns null when the whole blob is malformed', () => {
+    storage.setItem(KEY_CACHE, 'not json at all');
+    expect(readCache('reciters')).toBeNull();
+  });
+
+  it('never throws when storage is unavailable', () => {
+    globalThis.localStorage = undefined;
+    expect(() => writeCache('reciters', [{ id: 1 }])).not.toThrow();
+    expect(readCache('reciters')).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 10: Run everything**
+
+Run: `npm test && node scripts/verify-api.mjs && npm run build`
+Expected: all suites pass, `verify-api.mjs` exits 0 with every count exact, and the build completes. Assert exit codes, not literal test counts.
+
+- [ ] **Step 11: Commit**
 
 ```bash
-git add src/api src/state scripts/verify-api.mjs
+git add src/api src/state test scripts/verify-api.mjs
 git commit -m "feat: add API client, quran data layer, store, and persistence
 
-getJSON enforces a 3s timeout (6s for the 191KB reciter payload) and one
-retry, so a slow connection degrades instead of hanging. The store
-batches updates through queueMicrotask so a multi-key patch renders once."
+getJSON enforces a per-attempt timeout, retries only 5xx and network
+failures, and maps every failure path to Arabic copy so an HTTP status
+never reaches the user as an English string. A 4xx says the request
+reached the server and was refused, so it must not tell the user to check
+their connection. ApiError keeps .status for programmatic callers.
+
+The store batches notifications through queueMicrotask so a multi-key
+patch renders once, and isolates each listener so one throwing view cannot
+starve the others. deriveStyle parses the moshaf name rather than
+moshaf_type, whose real values are opaque codes like 11 and 222."
 ```
 
 ---
@@ -1106,6 +2064,7 @@ export function createEngine() {
   let current = null;
   let retryUsed = false;
   let endedAt = 0;
+  let suppressPause = false;
 
   const emit = (event, detail) => {
     const set = listeners.get(event);
@@ -1124,7 +2083,7 @@ export function createEngine() {
 
   el.addEventListener('play', () => emit('play', current));
   el.addEventListener('pause', () => {
-    if (el.ended) return;
+    if (suppressPause) return;
     emit('pause', current);
   });
 
@@ -1136,6 +2095,14 @@ export function createEngine() {
     const now = Date.now();
     if (now - endedAt < ENDED_GUARD_MS) return;
     endedAt = now;
+    // Browsers fire `ended` and then QUEUE a separate `pause` task. A listener
+    // that auto-advances runs synchronously inside this dispatch, and the
+    // src=/load() it performs resets el.ended to false before that queued pause
+    // arrives — so reading el.ended in the pause handler would let the pause
+    // through and report the freshly-started track as paused. A local flag,
+    // cleared by play() and by the next macrotask as a backstop, survives it.
+    suppressPause = true;
+    setTimeout(() => { suppressPause = false; }, 0);
     emit('ended', current);
   });
 
@@ -1157,16 +2124,22 @@ export function createEngine() {
   return {
     element: el,
 
-    async play(item) {
+async play(item) {
       const changing = !current || current.url !== item.url;
       current = { ...item, loading: true };
+      suppressPause = false;
       emit('track', current);
 
       if (changing) {
+        // Re-arms the one-retry budget: without this, a single failed URL would
+        // disable retry for the rest of the session.
         retryUsed = false;
         el.src = item.url;
         el.load();
       }
+      // Emitted here rather than left to the browser's loadstart, so a
+      // same-URL resume still reports loading to a subscriber.
+      setLoading(true);
 
       try {
         await el.play();
@@ -1178,9 +2151,12 @@ export function createEngine() {
 
     pause() { el.pause(); },
 
+    // A standalone function calling `play` directly, never an inline
+    // `this.play(...)`: callers hold the engine's methods as destructured
+    // bindings (`const { toggle } = engine`), where `this` is undefined.
     toggle() {
       if (el.paused) {
-        if (current) this.play(current);
+        if (current) play(current);
       } else {
         el.pause();
       }
@@ -1188,6 +2164,7 @@ export function createEngine() {
 
     seekBy(delta) {
       if (!current || current.seekable === false) return;
+      if (!Number.isFinite(delta)) return;
       const max = Number.isFinite(el.duration) ? el.duration : Infinity;
       el.currentTime = Math.min(Math.max(el.currentTime + delta, 0), max);
     },
@@ -1209,11 +2186,13 @@ export function createEngine() {
     },
 
     destroy() {
+      // Listeners cleared BEFORE el.pause(): pausing emits `pause`, so the
+      // other order would run every registered handler during teardown.
+      listeners.clear();
       el.pause();
       el.removeAttribute('src');
       el.load();
       el.remove();
-      listeners.clear();
     },
   };
 }
@@ -1341,8 +2320,10 @@ export function createMediaSession(handlers) {
   set('play', handlers.onPlay);
   set('pause', handlers.onPause);
   set('stop', handlers.onStop);
-  set('seekbackward', (e) => handlers.onSeekBy(-(e?.seekOffset || 10)));
-  set('seekforward', (e) => handlers.onSeekBy(e?.seekOffset || 10));
+  // `?? 10`, not `|| 10`: an explicit seekOffset of 0 is a real offset, and
+  // `||` would silently turn it into 10.
+  set('seekbackward', (e) => handlers.onSeekBy(-(e?.seekOffset ?? 10)));
+  set('seekforward', (e) => handlers.onSeekBy(e?.seekOffset ?? 10));
   set('previoustrack', handlers.onPrev);
   set('nexttrack', handlers.onNext);
 
@@ -1374,7 +2355,10 @@ export function createMediaSession(handlers) {
       try {
         ms.setPositionState({
           duration,
-          position: Math.min(currentTime, duration),
+          // Both ends clamped: Chrome throws a TypeError on a negative
+          // position, and the catch would swallow it, leaving the lock-screen
+          // position silently stale.
+          position: Math.min(Math.max(currentTime, 0), duration),
           playbackRate: rate,
         });
       } catch {
@@ -1400,10 +2384,14 @@ import { createMediaSession } from './audio/mediaSession.js';
 
 const engine = createEngine();
 const session = createMediaSession({
-  onPlay: () => engine.play(engine.getCurrent()),
+  // getCurrent() is null before anything has played; calling play() with it
+  // would throw on `item.url`.
+  onPlay: () => { const c = engine.getCurrent(); if (c) engine.play(c); },
   onPause: () => engine.pause(),
   onStop: () => engine.pause(),
   onSeekBy: (d) => engine.seekBy(d),
+  // Wired to nothing yet: Task 6 attaches the queue. The device gate expects
+  // these lock-screen buttons to be inert, not to advance the queue.
   onNext: () => document.dispatchEvent(new CustomEvent('quran:next')),
   onPrev: () => document.dispatchEvent(new CustomEvent('quran:prev')),
 });
@@ -1416,6 +2404,8 @@ engine.on('time', ({ currentTime, duration }) =>
 ```
 
 Add a temporary `<button id="probe">` that calls `engine.play({ url: 'https://server6.mp3quran.net/akdr/001.mp3', title: 'الفاتحة', kind: 'surah', seekable: true })`.
+
+**`index.html` must carry `<script type="module" src="/src/main.js"></script>` or nothing in `src/` reaches a device.** Task 1's placeholder document has no script tag, so without this the audio core is absent from `dist/` entirely and the probe appears to do nothing. Verify with `Select-String dist/index.html -Pattern 'main'` or by confirming `dist/assets/*.js` exists.
 
 Run: `npm run dev`, open the URL, click the button.
 Expected: audio plays. Lock the phone. Confirm audio continues and lock-screen controls appear with "الفاتحة".
@@ -1786,7 +2776,15 @@ export function createShell({ store }) {
 import { h, frag } from '../utils/dom.js';
 import { matchesAll } from '../utils/arabic.js';
 
-export function createRecitersView({ root, store, onSelect }) {
+/**
+ * Two explicit steps, as the user asked: pick the reciter, then pick one of that
+ * reciter's riwayas, then see only that riwaya's surahs.
+ *
+ * Tapping a reciter EXPANDS it in place rather than jumping straight to the
+ * surah grid, because a reciter's surah list depends on the riwaya: the same
+ * reader appears with 114 surahs under one riwaya and 38 under another.
+ */
+export function createRecitersView({ root, store, onSelectMoshaf }) {
   const grid = h('div', { class: 'grid grid-reciters' });
   root.append(grid);
 
@@ -1806,34 +2804,49 @@ export function createRecitersView({ root, store, onSelect }) {
       return;
     }
 
-    const frag = document.createDocumentFragment();
-    for (const r of list) {
-      const selected = r.moshaf.some((m) => m.id === s.selectedMoshafId);
-      const chips = r.moshaf.length
-        ? frag2(r.moshaf.map((m) => h('span', { class: 'chip' }, m.style || m.name)))
-        : h('span', { class: 'chip muted' }, 'لا روايات');
+    const nodes = list.map((r) => {
+      const chosen = r.moshaf.some((m) => m.id === s.selectedMoshafId);
+      const open = s.expandedReciterId === r.id;
+      const totals = r.moshaf.map((m) => m.surahTotal || 0).join(' · ');
 
-      const card = h('button', {
-        class: `card reciter${selected ? ' is-selected' : ''}`,
-        type: 'button',
-        onclick: () => onSelect(r),
+      const card = h('div', {
+        class: `card reciter${chosen ? ' is-selected' : ''}${open ? ' is-open' : ''}`,
       },
-        h('span', { class: 'reciter-name' }, r.name),
-        h('span', { class: 'reciter-meta' }, `${r.moshaf.length} رواية · ${r.moshaf[0]?.surahTotal || 0} سورة`),
-        chips);
-      frag.append(card);
-    }
-    grid.append(frag);
+        // The whole card toggles the riwaya list; it is a div, not a button, so
+        // the nested riwaya buttons are not inside another button.
+        h('button', {
+          class: 'reciter-head', type: 'button',
+          'aria-expanded': String(open),
+          onclick: () => store.setState({ expandedReciterId: open ? null : r.id }),
+        },
+          h('span', { class: 'reciter-name' }, r.name),
+          h('span', { class: 'reciter-meta' },
+            `${r.moshaf.length} رواية · ${totals} سورة`),
+          h('span', { class: 'reciter-caret', 'aria-hidden': 'true' },
+            open ? '▲' : '▼')),
+      );
+
+      if (open) {
+        card.append(r.moshaf.length
+          ? frag(r.moshaf.map((m) => h('button', {
+            class: `riwaya${m.id === s.selectedMoshafId ? ' is-on' : ''}`,
+            type: 'button',
+            onclick: () => onSelectMoshaf(r, m),
+          },
+            h('span', { class: 'riwaya-name' }, m.name),
+            h('span', { class: 'riwaya-meta' }, `${m.surahTotal} سورة`))))
+          : h('p', { class: 'empty' }, 'لا روايات متاحة لهذا القارئ'));
+      }
+
+      return card;
+    });
+
+    grid.replaceChildren(frag(nodes));
   }
 
-  const frag2 = (nodes) => {
-    const f = document.createDocumentFragment();
-    for (const n of nodes) f.append(n);
-    return f;
-  };
-
   store.subscribe((s, keys) => {
-    if (keys.has('reciters') || keys.has('query') || keys.has('selectedMoshafId')) render();
+    if (keys.has('reciters') || keys.has('query') ||
+        keys.has('selectedMoshafId') || keys.has('expandedReciterId')) render();
   }, { immediate: true });
 
   return { render };
@@ -1843,48 +2856,70 @@ export function createRecitersView({ root, store, onSelect }) {
 - [ ] **Step 4: Create `src/ui/surahs.js`**
 
 ```js
-import { h } from '../utils/dom.js';
+import { h, frag } from '../utils/dom.js';
 import { matchesAll } from '../utils/arabic.js';
 import { isFavorite } from '../utils/favorites.js';
+import { AYAH_COUNTS } from '../utils/ayah-counts.js';
 
-export function createSurahsView({ root, store, onPlay, onToggleFavorite }) {
+export function createSurahsView({ root, store, onPlay, onToggleFavorite, onChangeReciter }) {
+  const head = h('div', { class: 'surah-head' });
   const grid = h('div', { class: 'grid grid-surahs' });
-  root.append(grid);
+  root.append(head, grid);
 
   function render() {
     const s = store.getState();
     const moshaf = s.selectedMoshaf;
     grid.replaceChildren();
 
-    if (!moshaf) {
-      grid.append(h('p', { class: 'empty' }, 'اختر قارئاً من تبويب «القرّاء» أولاً لعرض سوره'));
-      return;
-    }
+    // Always shows which reader and riwaya the surah list belongs to, and is
+    // the way back to changing either.
+    head.replaceChildren(moshaf
+      ? frag(
+        h('div', { class: 'surah-where' },
+          h('span', { class: 'surah-where-reciter' }, moshaf.reciterName),
+          h('span', { class: 'surah-where-riwaya' }, moshaf.name)),
+        h('button', {
+          class: 'btn-ghost', type: 'button',
+          onclick: () => onChangeReciter(moshaf.reciterId),
+        }, 'تغيير'),
+        h('span', { class: 'surah-count' }, `${moshaf.surahList.length} سورة`))
+      : h('p', { class: 'empty' }, 'اختر قارئاً ثم روايته من تبويب «القرّاء»'));
+
+    if (!moshaf) return;
 
     const ids = s.query
-      ? moshaf.surahList.filter((id) => matchesAll(s.suwarById.get(id)?.name || '', s.query))
+      ? moshaf.surahList.filter((id) =>
+          matchesAll(s.suwarById.get(id)?.name || '', s.query))
       : moshaf.surahList;
 
     if (ids.length === 0) {
-      grid.append(h('p', { class: 'empty' }, s.reciters.length ? 'لا نتائج مطابقة' : 'جارٍ التحميل…'));
+      grid.append(h('p', { class: 'empty' },
+        s.suwarById.size ? 'لا نتائج مطابقة' : 'جارٍ التحميل…'));
       return;
     }
 
-    const frag = document.createDocumentFragment();
-    for (const id of ids) {
+    const nodes = ids.map((id) => {
       const meta = s.suwarById.get(id);
       const fav = isFavorite(s.favorites, id, moshaf.id);
-      const card = h('div', {
-        class: `card surah${s.playback?.surahId === id && s.playback?.moshafId === moshaf.id ? ' is-playing' : ''}`,
+      const isNow = s.playback?.kind === 'surah' &&
+        s.playback.surahId === id && s.playback.moshafId === moshaf.id;
+
+      return h('div', {
+        class: `card surah${isNow ? ' is-playing' : ''}`,
         role: 'button',
         tabindex: '0',
         onclick: () => onPlay(id),
-        onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPlay(id); } },
+        onkeydown: (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPlay(id); }
+        },
       },
-        h('span', { class: 'surah-num' }, meta?.makyi === 'مكية' ? '' : 'مدنية'),
+        h('span', { class: 'surah-place' },
+          meta?.isMeccan ? 'مكية' : 'مدنية'),
         h('span', { class: 'surah-name' }, meta?.name || `سورة ${id}`),
-        h('span', { class: 'surah-count' }, meta?.makyi === 'مكية' ? '' : ''),
-        h('span', { class: 'ayah-badge' }, String(id)),
+        h('span', { class: 'ayah-badge', 'aria-hidden': 'true' },
+          String(AYAH_COUNTS[id] ?? '')),
+        h('span', { class: 'ayah-label' },
+          `${AYAH_COUNTS[id] ?? '؟'} آية`),
         h('button', {
           class: `heart${fav ? ' is-on' : ''}`,
           type: 'button',
@@ -1893,9 +2928,9 @@ export function createSurahsView({ root, store, onPlay, onToggleFavorite }) {
           onclick: (e) => { e.stopPropagation(); onToggleFavorite(id); },
           html: fav ? '&#9829;' : '&#9825;',
         }));
-      frag.append(card);
-    }
-    grid.append(frag);
+    });
+
+    grid.replaceChildren(frag(nodes));
   }
 
   store.subscribe((s, keys) => {
@@ -1906,8 +2941,6 @@ export function createSurahsView({ root, store, onPlay, onToggleFavorite }) {
   return { render };
 }
 ```
-
-Replace the placeholder `surah-num`, `surah-count`, and `ayah-badge` content: `ayah-badge` shows the surah's ordinal inside the decorative circle, and `surah-count` shows the ayah count once `getSuwar()` is confirmed to include it. If the API does not return ayah counts, render the makyi/madani label only and drop `surah-count`.
 
 - [ ] **Step 5: Create `src/ui/favorites.js`**
 
@@ -2078,11 +3111,13 @@ Append to `src/styles/components.css`:
   font-size: var(--fs-xs); margin-inline-end: var(--sp-1); }
 .chip.muted { background: var(--surface-hover); color: var(--text-faint); }
 
-.surah { place-items: center; text-align: center; padding: var(--sp-3); }
+.surah { place-items: center; text-align: center; padding: var(--sp-3); gap: var(--sp-1); }
+.surah-place { font-size: var(--fs-xs); color: var(--text-faint); }
 .surah-name { font-family: var(--font-quran); font-size: var(--fs-lg); font-weight: 700; }
-.ayah-badge { inline-size: 34px; block-size: 34px; display: grid; place-items: center;
+.ayah-badge { inline-size: 36px; block-size: 36px; display: grid; place-items: center;
   border: 1px solid var(--gold); border-radius: var(--r-full); color: var(--gold);
-  font-size: var(--fs-xs); }
+  font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.ayah-label { font-size: var(--fs-xs); color: var(--text-muted); }
 .surah.is-playing { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .heart { position: absolute; inset-block-start: var(--sp-1); inset-inline-end: var(--sp-1);
   inline-size: var(--tap); block-size: var(--tap); font-size: var(--fs-lg);
@@ -2148,6 +3183,7 @@ const store = createStore({
   offline: !navigator.onLine,
   reciters: [], suwarById: new Map(), riwayat: [], radios: [],
   selectedMoshafId: saved.selectedMoshafId ?? null,
+  expandedReciterId: saved.expandedReciterId ?? null,
   selectedMoshaf: null,
   playback: null,
   repeat: saved.repeat || 'off',
@@ -2157,9 +3193,14 @@ const store = createStore({
 const queue = createQueue();
 const engine = createEngine();
 
-const moshafOf = (id) => store.getState().reciters
-  .flatMap((r) => r.moshaf.map((m) => ({ ...m, reciterName: r.name })))
-  .find((m) => m.id === id) || null;
+const moshafIndex = new Map();
+function indexMoshaf(reciters) {
+  moshafIndex.clear();
+  for (const r of reciters) {
+    for (const m of r.moshaf) moshafIndex.set(m.id, { ...m, reciterId: r.id, reciterName: r.name });
+  }
+}
+const moshafOf = (id) => moshafIndex.get(id) || null;
 
 function resolveMoshaf() {
   const s = store.getState();
@@ -2168,21 +3209,29 @@ function resolveMoshaf() {
   if (moshaf) queue.setPlaylist(buildPlaylist(moshaf, s.suwarById));
 }
 
-function playSurah(surahId, { fromFavorite } = {}) {
+function playSurah(surahId) {
   const s = store.getState();
-  const moshaf = fromFavorite
-    ? { ...fromFavorite, reciterName: fromFavorite.reciterName }
-    : s.selectedMoshaf;
+  const moshaf = s.selectedMoshaf;
   if (!moshaf) return;
 
-  queue.setPlaylist(fromFavorite
-    ? buildPlaylist(moshaf, s.suwarById)
-    : queue.items());
-  queue.setIndexBySurah(surahId);
+  // Only rebuild the queue from the moshaf when this surah is inside it.
+  // A favorite may point at a moshaf the user has not selected.
+  if (queue.setIndexBySurah(surahId) === -1) {
+    queue.setPlaylist(buildPlaylist(moshaf, s.suwarById));
+    if (queue.setIndexBySurah(surahId) === -1) {
+      store.setState({
+        playback: {
+          kind: 'surah', surahId, moshafId: moshaf.id, url: '',
+          title: s.suwarById.get(surahId)?.name || `سورة ${surahId}`,
+          reciterName: moshaf.reciterName, riwayaName: moshaf.name,
+          isPlaying: false, isFavorite: false, error: 'هذه السورة غير متوفرة لهذا القارئ',
+        },
+      });
+      return;
+    }
+  }
 
-  const cur = queue.current();
-  if (!cur) return;
-
+  const cur = queue.current;
   const isFav = isFavorite(s.favorites, surahId, moshaf.id);
   store.setState({
     playback: {
@@ -2197,11 +3246,28 @@ function playSurah(surahId, { fromFavorite } = {}) {
   });
 }
 
+/** Plays a saved favorite, switching to that reciter's own playlist. */
+function playFavorite(fav) {
+  const s = store.getState();
+  const moshaf = moshafOf(fav.moshafId);
+  if (!moshaf) {
+    qs('#toast').textContent = 'القارئ لم يعد متوفراً';
+    const t = qs('#toast'); t.hidden = false;
+    clearTimeout(t._timer); t._timer = setTimeout(() => { t.hidden = true; }, 2200);
+    return;
+  }
+  store.setState({ selectedMoshafId: fav.moshafId });
+  writeState({ selectedMoshafId: fav.moshafId });
+  resolveMoshaf();
+  playSurah(fav.surahId);
+}
+
 function playRadio(radio) {
   store.setState({
     playback: {
       kind: 'radio', url: radio.url, title: radio.name,
-      reciterName: 'بث مباشر', isPlaying: true, isFavorite: false, seekable: false,
+      reciterName: 'بث مباشر', isPlaying: true, isFavorite: false,
+      seekable: false, error: null,
     },
   });
   engine.play({ url: radio.url, title: radio.name, artist: 'بث مباشر', kind: 'radio', seekable: false });
@@ -2229,6 +3295,7 @@ function toggleCurrentFavorite() {
 }
 
 function toggleSurah(surahId, moshafId) {
+  if (moshafId == null) return;
   const s = store.getState();
   const moshaf = moshafOf(moshafId);
   const meta = s.suwarById.get(surahId);
@@ -2246,8 +3313,8 @@ function toggleSurah(surahId, moshafId) {
     playback: s.playback?.surahId === surahId && s.playback?.moshafId === moshafId
       ? { ...s.playback, isFavorite: stillFav } : s.playback,
   });
-  qs('#toast').textContent = stillFav ? 'أُضيفت إلى المفضلة' : 'أُزيلت من المفضلة';
   const t = qs('#toast');
+  t.textContent = stillFav ? 'أُضيفت إلى المفضلة' : 'أُزيلت من المفضلة';
   t.hidden = false;
   clearTimeout(t._timer);
   t._timer = setTimeout(() => { t.hidden = true; }, 1800);
@@ -2257,13 +3324,40 @@ function playAllFavorites() {
   const s = store.getState();
   const ordered = sortForPlayback(s.favorites);
   if (ordered.length === 0) return;
-  const moshafById = new Map(
-    s.reciters.flatMap((r) => r.moshaf.map((m) => [m.id, { ...m, reciterName: r.name }])));
-  queue.setPlaylist(ordered.map((f) => {
-    const m = moshafById.get(f.moshafId);
-    return { surahId: f.surahId, title: f.surahName, url: surahUrl(f.server || m?.server, f.surahId) };
-  }));
-  playSurah(ordered[0].surahId);
+
+  // Play-all crosses reciters, so build one queue from the saved URLs rather
+  // than a single reciter's playlist.
+  queue.setPlaylist(ordered.map((f) => ({
+    surahId: f.surahId,
+    title: f.surahName,
+    url: surahUrl(f.server, f.surahId),
+    fav: f,
+  })));
+  playFromQueue(0);
+}
+
+function playFromQueue(index) {
+  const item = queue.items[index];
+  if (!item) return;
+  queue.setIndexBySurah(item.surahId);
+
+  if (item.fav) {
+    const fav = item.fav;
+    store.setState({
+      playback: {
+        kind: 'surah', surahId: fav.surahId, moshafId: fav.moshafId, url: item.url,
+        title: fav.surahName, reciterName: fav.reciterName, riwayaName: fav.riwayaName,
+        isPlaying: true, isFavorite: true, seekable: true, error: null,
+      },
+    });
+  } else {
+    playSurah(item.surahId);
+    return;
+  }
+  engine.play({
+    url: item.url, title: item.title, artist: item.fav.reciterName,
+    album: item.fav.riwayaName, kind: 'surah', seekable: true,
+  });
 }
 
 const shell = createShell({ store });
@@ -2272,10 +3366,11 @@ createSearch({ store });
 createRecitersView({
   root: qs('#view-reciters'),
   store,
-  onSelect(reciter) {
-    const first = reciter.moshaf[0];
-    store.setState({ selectedMoshafId: first.id, activeTab: 'surahs' });
-    writeState({ selectedMoshafId: first.id });
+  // Explicit riwaya choice, per the user: the surah list depends on which
+  // riwaya is selected, so the reader's first riwaya is never auto-selected.
+  onSelectMoshaf(reciter, moshaf) {
+    store.setState({ selectedMoshafId: moshaf.id, activeTab: 'surahs' });
+    writeState({ selectedMoshafId: moshaf.id });
     resolveMoshaf();
   },
 });
@@ -2284,11 +3379,16 @@ createSurahsView({
   root: qs('#view-surahs'), store,
   onPlay: (id) => playSurah(id),
   onToggleFavorite: (id) => toggleSurah(id, store.getState().selectedMoshafId),
+  onChangeReciter(reciterId) {
+    // Back to the readers tab with that reader already expanded, so changing
+    // riwaya is one tap instead of hunting for the reader again.
+    store.setState({ expandedReciterId: reciterId, activeTab: 'reciters' });
+  },
 });
 
 createFavoritesView({
   root: qs('#view-favorites'), store,
-  onPlay: (f) => playSurah(f.surahId, { fromFavorite: f }),
+  onPlay: playFavorite,
   onRemove: (f) => toggleSurah(f.surahId, f.moshafId),
   onPlayAll: playAllFavorites,
 });
@@ -2310,11 +3410,47 @@ const session = createMediaSession({
   onNext: advance,
   onPrev: () => { const p = queue.prev(); if (p) playSurah(p.surahId); },
 });
-engine.on('play', () => session.setState(true));
-engine.on('pause', () => session.setState(false));
+engine.on('play', () => {
+  session.setState(true);
+  store.setState({ playback: { ...store.getState().playback, isPlaying: true, error: null } });
+});
+engine.on('pause', () => {
+  session.setState(false);
+  store.setState({ playback: { ...store.getState().playback, isPlaying: false } });
+});
 engine.on('time', ({ currentTime, duration }) =>
   session.setPosition(currentTime, duration, engine.element.playbackRate || 1));
 engine.on('ended', advance);
+engine.on('error', () => {
+  const p = store.getState().playback;
+  store.setState({
+    playback: { ...p, isPlaying: false, error: 'تعذّر تحميل السورة. تحقّق من الاتصال.' },
+  });
+  showErrorToast('تعذّر تحميل السورة', 'تخطّي', () => advance());
+});
+engine.on('blocked', () => {
+  const p = store.getState().playback;
+  store.setState({ playback: { ...p, isPlaying: false } });
+  showErrorToast('اضغط تشغيل للسماح بالصوت', 'تشغيل', () => {
+    const p2 = store.getState().playback;
+    if (p2?.url) engine.play({ ...p2, seekable: p2.kind !== 'radio' });
+  });
+});
+
+function showErrorToast(message, actionLabel, onAction) {
+  const t = qs('#toast');
+  t.replaceChildren(
+    h('span', {}, message),
+    h('button', {
+      class: 'btn-primary', type: 'button',
+      style: 'margin-inline-start:var(--sp-3)',
+      onclick: onAction,
+    }, actionLabel),
+  );
+  t.hidden = false;
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.hidden = true; t.replaceChildren(); }, 6000);
+}
 
 addEventListener('online', () => store.setState({ offline: false }));
 addEventListener('offline', () => store.setState({ offline: true }));
@@ -2330,6 +3466,7 @@ addEventListener('offline', () => store.setState({ offline: true }));
   if (cachedReciters) store.setState({ reciters: cachedReciters });
   if (cachedRadios) store.setState({ radios: cachedRadios });
   if (cachedRiwayat) store.setState({ riwayat: cachedRiwayat });
+  indexMoshaf(cachedReciters || []);
   resolveMoshaf();
 
   try {
@@ -2344,6 +3481,7 @@ addEventListener('offline', () => store.setState({ offline: true }));
       reciters, radios, riwayat,
       suwarById: new Map(suwar.map((s) => [s.id, s])),
     });
+    indexMoshaf(reciters);
     resolveMoshaf();
   } catch (err) {
     const hasCache = store.getState().reciters.length > 0;
