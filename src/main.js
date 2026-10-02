@@ -24,6 +24,7 @@ import { createSurahsView } from './ui/surahs.js';
 import { createFavoritesView } from './ui/favorites.js';
 import { createRadioView } from './ui/radio.js';
 import { createPlayer } from './ui/player.js';
+import { initPWA } from './pwa.js';
 import { toggleFavorite, isFavorite, isRadioFavorite, sortForPlayback } from './utils/favorites.js';
 import { h, qs } from './utils/dom.js';
 
@@ -461,6 +462,11 @@ const player = createPlayer({
 
 const shell = createShell({ store });
 createSearch({ store });
+
+// registerType is 'prompt' with no unconditional skipWaiting: swapping the
+// worker under a live session would let old code request assets the new shell
+// no longer references, so the toast above asks first.
+initPWA();
 
 const reciters = createRecitersView({
   root: qs('#view-reciters'),
