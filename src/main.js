@@ -503,7 +503,12 @@ createSurahsView({
 createFavoritesView({
   root: qs('#view-favorites'), store,
   onPlay: playFavorite,
-  onRemove: (fav) => toggleSurah(fav.surahId, fav.moshafId),
+  onRemove: (fav) => {
+    // Radio favorites carry no surahId/moshafId, so toggleSurah's null guard
+    // would swallow the removal silently: no state change, no toast.
+    if (fav.kind === 'radio') toggleRadio(fav.url, fav.stationName);
+    else toggleSurah(fav.surahId, fav.moshafId);
+  },
   onPlayAll: playAllFavorites,
   onBrowse: () => store.setState({ activeTab: 'surahs' }),
 });
@@ -650,5 +655,5 @@ export const app = {
   store, queue, engine, player, shell, session,
   indexMoshaf, moshafOf, resolveMoshaf, showToast,
   playSurah, playQueueItem, playRadio, playFavorite, playAllFavorites,
-  advance, previous, toggleSurah, toggleCurrentFavorite, loadData,
+  advance, previous, toggleSurah, toggleRadio, toggleCurrentFavorite, loadData,
 };

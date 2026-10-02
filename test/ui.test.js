@@ -1467,6 +1467,23 @@ describe('app wiring', () => {
     expect(JSON.parse(localStorage.getItem('quran.state.v2')).favorites).toEqual([]);
   });
 
+  it('removes a radio favorite from the favorites tab', async () => {
+    // onRemove routed every favorite through toggleSurah, whose null guard
+    // swallowed radio entries silently: no state change, no toast. The heart
+    // on a saved station did nothing.
+    app = await boot();
+    app.toggleRadio('https://r.example/1', 'محطة الاختبار');
+    await flush();
+    expect(app.store.getState().favorites).toHaveLength(1);
+    qs('.tab[data-tab="favorites"]').click();
+    await flush();
+    expect(qsa('.fav', document)).toHaveLength(1);
+    qs('.fav .heart', document).click();
+    await flush();
+    expect(app.store.getState().favorites).toEqual([]);
+    expect(qsa('.fav', document)).toHaveLength(0);
+  });
+
   it('shows the playing surah’s favorite state in the player', async () => {
     app = await bootWithReciter();
     qs('#view-surahs .surah-open').click();
