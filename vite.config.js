@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
   base: '/quran_api/',
@@ -10,6 +11,15 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // `virtual:pwa-register` exists only inside Vite's dev server and build.
+    // Tests resolve through Node, so without this alias every suite importing
+    // src/main.js fails at import time. Scoped to `test` so the production
+    // build still resolves the real virtual module through the plugin.
+    // fileURLToPath, not .pathname: on Windows the path contains a drive
+    // letter and spaces, which a raw pathname mangles.
+    alias: {
+      'virtual:pwa-register': fileURLToPath(new URL('./test/stubs/pwa-register.js', import.meta.url)),
+    },
     include: ['test/**/*.test.js'],
   },
   plugins: [
