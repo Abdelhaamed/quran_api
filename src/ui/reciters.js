@@ -50,49 +50,14 @@ export function createRecitersView({ root, store, onSelectMoshaf }) {
     return `${counts[0]}–${counts[counts.length - 1]} سورة`;
   }
 
-  function head(r, open) {
+  function head(r) {
     const meta = [riwayaCount(moshafsOf(r).length)];
     const range = surahRange(r);
     if (range) meta.push(range);
 
-    // A <button>, and the only interactive element in the collapsed card: the
-    // riwaya buttons appended below are siblings of it inside a plain <div>, not
-    // descendants, so no button is ever nested inside another.
-    return h('button', {
-      class: 'reciter-head',
-      type: 'button',
-      'aria-expanded': String(open),
-      onclick: () => store.setState({ expandedReciterId: open ? null : r.id }),
-    },
-      h('span', { class: 'reciter-text' },
-        h('span', { class: 'reciter-name' }, r.name),
-        h('span', { class: 'reciter-meta' }, meta.join(' · '))),
-      // Up/down, not left/right: the glyph encodes a vertical direction, which
-      // RTL does not mirror (the same rule player.js applies to its arrows).
-      h('span', { class: 'reciter-caret', 'aria-hidden': 'true' },
-        open ? '▲' : '▼'));
-  }
-
-  function riwayaList(r, selectedMoshafId) {
-    const moshafs = moshafsOf(r);
-    if (moshafs.length === 0) {
-      return h('p', { class: 'empty' }, 'لا روايات متاحة لهذا القارئ');
-    }
-    return h('div', { class: 'riwaya-list' }, moshafs.map((m) => {
-      const on = m.id === selectedMoshafId;
-      return h('button', {
-        class: `riwaya${on ? ' is-on' : ''}`,
-        type: 'button',
-        // aria-current rather than aria-pressed: this is the choice in a set,
-        // not a toggle, and pressing the current one again is a no-op.
-        'aria-current': on ? 'true' : null,
-        onclick: () => onSelectMoshaf(r, m),
-      },
-        h('span', { class: 'riwaya-name' }, m.name),
-        h('span', { class: 'riwaya-meta' },
-          m.style ? h('span', { class: 'chip' }, m.style) : null,
-          m.surahTotal ? `${m.surahTotal} سورة` : null));
-    }));
+    return h('span', { class: 'reciter-text' },
+      h('span', { class: 'reciter-name' }, r.name),
+      h('span', { class: 'reciter-meta' }, meta.join(' · ')));
   }
 
   /**
@@ -183,13 +148,15 @@ function canRecite(moshafs, surahIds) {
 
     const nodes = list.map((r) => {
       const moshafs = moshafsOf(r);
-      const open = s.expandedReciterId === r.id;
       const chosen = moshafs.some((m) => m.id === s.selectedMoshafId);
-      const card = h('div', {
-        class: `card reciter${chosen ? ' is-selected' : ''}${open ? ' is-open' : ''}`,
-      }, head(r, open));
-      if (open) card.append(riwayaList(r, s.selectedMoshafId));
-      return card;
+      // One button, one tap: the riwaya comes from the top filter, so the
+      // card carries no riwaya list and never expands. Resolution lives in
+      // onSelectMoshaf, which picks the filtered riwaya or the first one.
+      return h('button', {
+        class: `card reciter${chosen ? ' is-selected' : ''}`,
+        type: 'button',
+        onclick: () => onSelectMoshaf(r),
+      }, head(r));
     });
 
     grid.replaceChildren(frag(nodes));
@@ -205,27 +172,8 @@ function canRecite(moshafs, surahIds) {
   const unsubscribe = store.subscribe((_s, keys) => {
     if (keys.has('reciters') || keys.has('query') || keys.has('suwarById') ||
         keys.has('riwayat') || keys.has('riwayaFilter') ||
-        keys.has('selectedMoshafId') || keys.has('expandedReciterId')) render();
+        keys.has('selectedMoshafId')) render();
   }, { immediate: true });
 
-  /**
-   * Scrolls the expanded reader into view. The wiring calls this after sending
-   * the user back to this tab from the surah header's change button, because
-   * with 241 cards the reader they are switching riwaya on can be many screens
-   * away and the expansion they asked for would be off screen.
-   *
-   * Queued on a microtask rather than scrolled inline: setState flushes its
-   * listeners on a microtask, so scrolling first would measure the card list as
-   * it was before the re-render this navigation is about to cause.
-   */
-  function reveal() {
-    queueMicrotask(() => {
-      const card = qs('.reciter.is-open', grid);
-      // Optional call: happy-dom has no layout, and scrollIntoView is absent in
-      // some embedded webviews, where the call would throw inside the microtask.
-      card?.scrollIntoView?.({ block: 'center' });
-    });
-  }
-
-  return { render, reveal, destroy: unsubscribe };
+  return { render, destroy: unsubscribe };
 }

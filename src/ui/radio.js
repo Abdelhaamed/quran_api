@@ -1,5 +1,7 @@
 import { h, frag } from '../utils/dom.js';
 import { matchesAll, normalize } from '../utils/arabic.js';
+import { isRadioFavorite } from '../utils/favorites.js';
+import { icon } from './icons.js';
 
 /**
  * The /radios endpoint returns no category field — only id, name, url. But
@@ -39,7 +41,7 @@ export function categoryLabel(id) {
   return (CATEGORIES.find((c) => c.id === id) || CATEGORIES[0]).label;
 }
 
-export function createRadioView({ root, store, onPlay }) {
+export function createRadioView({ root, store, onPlay, onToggleFavorite }) {
   const chips = h('div', { class: 'riwaya-filter', role: 'group', 'aria-label': 'تصنيف القنوات' });
   const list = h('div', { class: 'list' });
   root.append(chips, list);
@@ -66,16 +68,22 @@ export function createRadioView({ root, store, onPlay }) {
       // Matched on the URL, not the name: two stations can share a name, and
       // the URL is what the engine is actually holding.
       const on = s.playback?.kind === 'radio' && s.playback.url === r.url;
-      return h('button', {
-        class: `row${on ? ' is-playing' : ''}`,
-        type: 'button',
-        // seekable: false is set by playRadio, not here: the flag describes what
-        // the stream answers with (Accept-Ranges: none), and the engine is the
-        // only layer that can refuse to seek on it.
-        onclick: () => onPlay(r),
-      },
-        h('span', { class: 'row-dot' }),
-        h('span', { class: 'row-name' }, r.name));
+      const fav = isRadioFavorite(s.favorites, r.url);
+      return h('div', { class: `row-wrap${on ? ' is-playing' : ''}` },
+        h('button', {
+          class: 'row',
+          type: 'button',
+          onclick: () => onPlay(r),
+        },
+          h('span', { class: 'row-dot' }),
+          h('span', { class: 'row-name' }, r.name)),
+        h('button', {
+          class: `heart${fav ? ' is-on' : ''}`,
+          type: 'button',
+          'aria-pressed': String(fav),
+          'aria-label': fav ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة',
+          onclick: (e) => { e.stopPropagation(); onToggleFavorite(r); },
+        }, icon(fav ? 'heartOn' : 'heart')));
     });
 
     list.replaceChildren(frag(nodes));
@@ -104,7 +112,7 @@ export function createRadioView({ root, store, onPlay }) {
 
   const unsubscribe = store.subscribe((_s, keys) => {
     if (keys.has('radios') || keys.has('query') || keys.has('playback') ||
-        keys.has('radioCategory')) render();
+        keys.has('favorites') || keys.has('radioCategory')) render();
   }, { immediate: true });
 
   return { render, destroy: unsubscribe };

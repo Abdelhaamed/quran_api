@@ -1,4 +1,4 @@
-.pl {
+﻿.pl {
   position: fixed;
   inset-inline: 0;
   inset-block-end: 0;
@@ -25,7 +25,7 @@
 
 /* Wrap rather than shrink: the six controls need 304px of button plus 40px of
    gap, which a 360px phone cannot supply at --sp-2. `flex: 0 0 auto` is what
-   makes that safe — without it flexbox silently squeezes every button below
+   makes that safe â€” without it flexbox silently squeezes every button below
    --tap, which is a WCAG 2.5.8 failure that no layout assertion would catch. */
 .pl-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-2); }
 .pl-btn {
@@ -67,7 +67,7 @@
    flex row breaks greedily and orphans `next` on a line of its own, so a
    3-column grid gives two balanced rows of three at the same 219px height.
    The grid deliberately starts at 347 and not at 384: between 348 and 384 the
-   flex row does fit, and a 360px phone — the commonest Android width — would
+   flex row does fit, and a 360px phone â€” the commonest Android width â€” would
    otherwise trade its 167px player for a 219px one for nothing. */
 @media (max-width: 347px) {
   .pl-controls { display: grid; grid-template-columns: repeat(3, auto); }
@@ -90,8 +90,8 @@
 
 /* Appbar, search and tabs are ONE sticky group. As three separate
    `position: sticky` siblings each needs the height of the one above it as a
-   pixel `top` offset, and those heights are content-derived — a safe-area
-   inset, a padded input, rem-based type — so the offsets are only ever right at
+   pixel `top` offset, and those heights are content-derived â€” a safe-area
+   inset, a padded input, rem-based type â€” so the offsets are only ever right at
    one device and one font size. The plan's version hardcoded 61px where the
    search bar measures 72px, and the tabs sat 11px over the search field. One
    group has no offsets to keep in sync. */
@@ -120,11 +120,17 @@
   display: grid; place-items: center; font-size: var(--fs-lg); }
 .icon-btn:hover { background: var(--surface-hover); }
 
-.searchbar { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); }
-.search-icon { color: var(--text-faint); font-size: var(--fs-base); line-height: 1; }
+.searchbar { position: relative; padding: var(--sp-3) var(--sp-4); }
+/* Inside the field at the inline start (right in RTL), absolutely positioned
+   so the input keeps its full tap area and the icon never shifts the text. */
+.search-icon { position: absolute; inset-inline-start: calc(var(--sp-4) + var(--sp-3));
+  top: 50%; translate: 0 -50%; color: var(--text-faint); font-size: var(--fs-base);
+  pointer-events: none; }
 #search {
-  flex: 1; min-inline-size: 0; min-block-size: var(--tap);
+  inline-size: 100%; min-block-size: var(--tap);
   padding: var(--sp-2) var(--sp-4);
+  /* Room for the icon at the inline start, mirrored automatically in RTL. */
+  padding-inline-start: calc(var(--sp-4) + var(--fs-base) + var(--sp-2));
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-full);
@@ -181,7 +187,7 @@
 .chip-lg.is-on { border-color: var(--accent); color: var(--accent-strong);
   background: color-mix(in srgb, var(--accent) 14%, transparent); font-weight: 600; }
 
-/* Reader card: a plain wrapper whose only interactive parts are SIBLING buttons —
+/* Reader card: a plain wrapper whose only interactive parts are SIBLING buttons â€”
    the head that expands it and one per riwaya. The card carries no padding so
    the head button fills it and stays a full-size target; padding it here would
    leave a dead strip around the head that looks tappable and is not. */
@@ -192,7 +198,7 @@
 }
 .reciter-head:hover { background: var(--surface-hover); }
 /* min-inline-size: 0 so a long reciter name ellipsises instead of pushing the
-   caret off the card — the grid/flex default of min-width:auto refuses to shrink
+   caret off the card â€” the grid/flex default of min-width:auto refuses to shrink
    below the content. */
 .reciter-text { display: grid; gap: var(--sp-1); min-inline-size: 0; }
 .reciter-caret { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--text-faint); line-height: 1; }
@@ -246,7 +252,11 @@
 .surah { padding: 0; }
 .surah-open, .fav-open { display: grid; gap: var(--sp-1); inline-size: 100%;
   border-radius: var(--r-md); }
-.surah-open { place-items: center; text-align: center; padding: var(--sp-4) var(--sp-2); }
+/* Top clearance equals the heart's own footprint: the 48px heart sits absolute
+   in the corner, and without this a two-line Amiri name in a 104px column
+   runs underneath it. The space is structural, not decorative. */
+.surah-open { place-items: center; text-align: center;
+  padding: calc(var(--tap) + var(--sp-1)) var(--sp-2) var(--sp-4); }
 .fav-open { padding: var(--sp-4); }
 
 .surah-place { font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; }
@@ -265,6 +275,11 @@
 .heart.is-on { color: var(--danger); }
 
 .list { display: grid; gap: var(--sp-1); }
+/* The row is a wrapper so the heart sits beside the station button without
+   nesting one button inside another. */
+.row-wrap { display: flex; align-items: stretch; gap: var(--sp-1); }
+.row-wrap .row { flex: 1; min-width: 0; }
+.row-wrap .heart { position: static; flex: none; align-self: center; }
 .row { display: flex; align-items: center; gap: var(--sp-3); min-block-size: var(--tap);
   padding: var(--sp-2) var(--sp-4); background: var(--surface);
   border: 1px solid var(--border); border-radius: var(--r-md); text-align: start; }
@@ -286,7 +301,7 @@
 
 /* Offset by the player's MEASURED height, not by --player-h. That token is a
    stale 88px while the player measures ~167px, and this toast sits at z-index
-   45 over the player's 40 — so a stale constant would paint the message on top
+   45 over the player's 40 â€” so a stale constant would paint the message on top
    of the player. --player-space is written by the player itself and already
    folds in its hidden state, the safe-area inset and the user's font size
    (ruling R30). The 0px fallback covers the frame before the first measure. */
@@ -305,4 +320,19 @@
   border: 1px solid var(--accent);
   box-shadow: var(--shadow);
   font-size: var(--fs-sm);
+}
+
+/* Large screens: the 720px phone column leaves most of a laptop empty, so the
+   content well widens and every grid gains columns. The player (.pl-inner)
+   reads the same token, so bar and content stay aligned. Filter strips stop
+   scrolling and wrap instead: on a wide screen hiding options behind a scroll
+   is pure loss, while on a phone the strip preserves vertical space. */
+@media (min-width: 768px) {
+  .riwaya-filter { flex-wrap: wrap; overflow-x: visible; }
+}
+@media (min-width: 1024px) {
+  :root { --content-max: 1180px; }
+  .grid-surahs { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .grid-reciters { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .grid-fav { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 }

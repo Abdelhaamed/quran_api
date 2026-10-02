@@ -14,6 +14,7 @@ const NO_MATCH = 'لا نتائج مطابقة';
  * having missed.
  */
 function matches(fav, query) {
+  if (fav.kind === 'radio') return matchesAll(fav.stationName || '', query);
   return matchesAll(fav.surahName, query) ||
     matchesAll(fav.reciterName || '', query) ||
     matchesAll(fav.riwayaName || '', query);
@@ -41,7 +42,7 @@ export function createFavoritesView({ root, store, onPlay, onRemove, onPlayAll, 
     }
 
     head.replaceChildren(
-      h('h2', { class: 'fav-count' }, `${favs.length} سورة`),
+      h('h2', { class: 'fav-count' }, `${favs.length} محفوظة`),
       h('button', { class: 'btn-primary', type: 'button', onclick: () => onPlayAll() },
         'تشغيل الكل'),
     );
@@ -61,16 +62,22 @@ export function createFavoritesView({ root, store, onPlay, onRemove, onPlayAll, 
     }
 
     const nodes = shown.map((f) => {
-      const on = s.playback?.kind === 'surah' &&
-        s.playback.surahId === f.surahId && s.playback.moshafId === f.moshafId;
+      const on = f.kind === 'radio'
+        ? s.playback?.kind === 'radio' && s.playback.url === f.url
+        : s.playback?.kind === 'surah' &&
+          s.playback.surahId === f.surahId && s.playback.moshafId === f.moshafId;
 
       // Div plus a real button rather than a role="button" div: the remove
       // control is interactive too, and nesting one inside the other is
       // invalid and unreachable by keyboard.
-      const open = h('button', { class: 'fav-open', type: 'button', onclick: () => onPlay(f) },
-        h('span', { class: 'surah-place' }, String(f.surahId)),
-        h('span', { class: 'surah-name' }, f.surahName),
-        h('span', { class: 'reciter-meta' }, `${f.reciterName} · ${f.riwayaName}`));
+      const open = f.kind === 'radio'
+        ? h('button', { class: 'fav-open', type: 'button', onclick: () => onPlay(f) },
+          h('span', { class: 'surah-name' }, f.stationName),
+          h('span', { class: 'reciter-meta' }, 'بث مباشر'))
+        : h('button', { class: 'fav-open', type: 'button', onclick: () => onPlay(f) },
+          h('span', { class: 'surah-place' }, String(f.surahId)),
+          h('span', { class: 'surah-name' }, f.surahName),
+          h('span', { class: 'reciter-meta' }, `${f.reciterName} · ${f.riwayaName}`));
 
       const heart = h('button', {
         class: 'heart is-on',

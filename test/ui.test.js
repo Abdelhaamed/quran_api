@@ -111,20 +111,12 @@ const storeWith = (over) => createStore(emptyState(over));
 const mountShellDom = () => { document.body.innerHTML = BODY; };
 
 /**
- * The two real taps of the reader -> riwaya -> surahs flow, in order. Written
- * once so no test can reach the surahs by a shortcut the user does not have: the
- * head tap expands, and only a riwaya tap selects.
+ * The single tap of the reader -> surahs flow. The riwaya comes from the top
+ * filter, so one tap on the card is the whole navigation — there is no
+ * expansion step to model here.
  */
-async function chooseMoshaf({ index = 0, riwaya = 0, root = document } = {}) {
-  const head = qsa('#view-reciters .reciter-head', root)[index];
-  // Only tap when the card is actually closed. `expandedReciterId` is persisted,
-  // so a test booting with storage intact can find a reader already open, and an
-  // unconditional tap would collapse it instead of expanding it.
-  if (head.getAttribute('aria-expanded') === 'false') {
-    head.click();
-    await flush();
-  }
-  qsa('#view-reciters .reciter.is-open .riwaya', root)[riwaya].click();
+async function chooseMoshaf({ index = 0, root = document } = {}) {
+  qsa('#view-reciters .reciter', root)[index].click();
   await flush();
 }
 
@@ -486,111 +478,28 @@ describe('createRecitersView', () => {
     expect(qs('.reciter-meta', root).textContent).toBe('بلا روايات');
   });
 
-  it('expands a reader in place instead of selecting it', async () => {
-    const { root, store, onSelectMoshaf } = build({ selectedMoshafId: 22 });
-    qsa('.reciter-head', root)[0].click();
+  it('selects on a single tap, with the reciter only', async () => {
+    const { root, onSelectMoshaf } = build({ selectedMoshafId: 22 });
+    qsa('.reciter', root)[0].click();
     await flush();
 
-    // Nothing was chosen: the tab did not move, the selection did not change and
-    // no riwaya callback fired. Expanding is not selecting.
-    expect(store.getState().activeTab).toBe('reciters');
-    expect(store.getState().selectedMoshafId).toBe(22);
-    expect(onSelectMoshaf).not.toHaveBeenCalled();
-    expect(store.getState().expandedReciterId).toBe(1);
+    // The tap carries the reciter; the riwaya comes from the top filter and is
+    // resolved by the wiring, not by this view.
+    expect(onSelectMoshaf).toHaveBeenCalledTimes(1);
+    expect(onSelectMoshaf.mock.calls[0][0].id).toBe(1);
   });
 
-  it('lists the expanded reader’s riwayas, and no other reader’s', async () => {
-    const { root } = build();
-    qsa('.reciter-head', root)[2].click();
-    await flush();
-
-    expect(qsa('.reciter.is-open', root)).toHaveLength(1);
-    expect(qsa('.riwaya', root).map((b) => qs('.riwaya-name', b).textContent))
-      .toEqual(['رواية حفص عن عاصم مرتل', 'رواية حفص عن عاصم مجود']);
-    expect(qsa('.riwaya', root).map((b) => qs('.riwaya-meta', b).textContent))
-      .toEqual(['مرتّل4 سورة', 'مجوّد1 سورة']);
-    // The head reports its own state rather than leaving aria-expanded stale.
-    expect(qsa('.reciter-head', root)[2].getAttribute('aria-expanded')).toBe('true');
-    expect(qsa('.reciter-head', root)[0].getAttribute('aria-expanded')).toBe('false');
-  });
-
-  it('collapses on a second tap, and moves the expansion to another reader', async () => {
-    const { root } = build();
-    qsa('.reciter-head', root)[0].click();
-    await flush();
-    qsa('.reciter-head', root)[0].click();
-    await flush();
-    expect(qsa('.riwaya', root)).toHaveLength(0);
-
-    qsa('.reciter-head', root)[0].click();
-    await flush();
-    qsa('.reciter-head', root)[2].click();
-    await flush();
-    // Only one reader is open at a time: two open readers make "which riwaya did
-    // I pick" ambiguous on a grid of 241 cards.
-    expect(qsa('.reciter.is-open', root)).toHaveLength(1);
-    expect(qs('.reciter.is-open .reciter-name', root).textContent).toBe('ياسر الدوسري');
-  });
-
-  it('expands whichever reader the store names, restored from storage', () => {
-    const { root } = build({ expandedReciterId: 3 });
-    expect(qs('.reciter.is-open .reciter-name', root).textContent).toBe('ياسر الدوسري');
-  });
-
-  it('reports the riwaya that was tapped, never the reader’s first', async () => {
-    const { root, store, onSelectMoshaf } = build();
-    qsa('.reciter-head', root)[2].click();
-    await flush();
-    qsa('.riwaya', root)[1].click();
-    await flush();
-
-    expect(onSelectMoshaf).toHaveBeenCalledWith(RECITERS[2], RECITERS[2].moshaf[1]);
-    expect(store.getState().expandedReciterId).toBe(3);
-  });
-
-  it('marks the chosen riwaya, not just its reader', async () => {
+  it('marks the card whose riwaya is selected', () => {
     const { root } = build({ selectedMoshafId: 32 });
-    qsa('.reciter-head', root)[2].click();
-    await flush();
-    const rows = qsa('.riwaya', root);
-    expect(rows[0].classList.contains('is-on')).toBe(false);
-    expect(rows[1].classList.contains('is-on')).toBe(true);
-    expect(rows[1].getAttribute('aria-current')).toBe('true');
-    expect(rows[0].getAttribute('aria-current')).toBe(null);
-    // The reader card is marked from its moshaf list, so the reader shows up as
-    // selected on the readers tab even though it is the surahs tab in play.
+    // Reciter 3 holds moshafs 31 and 32; 32 is selected.
     expect(qsa('.reciter', root)[2].classList.contains('is-selected')).toBe(true);
+    expect(qsa('.reciter', root)[0].classList.contains('is-selected')).toBe(false);
   });
 
-  it('shows a reader with no riwayas instead of an empty expander', async () => {
-    const { root } = build({ reciters: [reciter(7, 'قارئ بلا روايات')] });
-    qsa('.reciter-head', root)[0].click();
-    await flush();
+  it('renders no riwaya list inside any card', () => {
+    const { root } = build();
     expect(qsa('.riwaya', root)).toHaveLength(0);
-    expect(qs('.empty', root).textContent).toBe('لا روايات متاحة لهذا القارئ');
-  });
-
-  it('never nests one button inside another', async () => {
-    const { root } = build({ selectedMoshafId: 31 });
-    expectNoNestedButtons(root);
-    // The same check with a reader open, which is the only state that adds the
-    // riwaya buttons.
-    qsa('.reciter-head', root)[2].click();
-    await flush();
-    expectNoNestedButtons(root);
-    expect(qsa('.reciter.is-open button', root).length).toBeGreaterThan(1);
-  });
-
-  it('falls back to the riwaya name when deriveStyle found no style word', async () => {
-    const { root } = build({
-      reciters: [reciter(1, 'قارئ', moshaf(11, { style: '', name: 'رواية ورش' }))],
-    });
-    qsa('.reciter-head', root)[0].click();
-    await flush();
-    // No chip rather than a chip of nothing: the full name is already the row's
-    // own label, so the style word is a shortcut and not the label.
-    expect(qs('.riwaya-name', root).textContent).toBe('رواية ورش');
-    expect(qsa('.chip', root)).toHaveLength(0);
+    expect(qsa('.reciter-head', root)).toHaveLength(0);
   });
 
   it('matches a reciter on a riwaya its own name does not contain', () => {
@@ -634,11 +543,9 @@ describe('createRecitersView', () => {
     expect(qs('.reciter-meta', root).textContent).toBe('بلا روايات');
   });
 
-  it('shows a cached reciter with a null moshaf as having none when expanded', async () => {
+  it('shows a cached reciter with a null moshaf as having none', () => {
     const { root } = build({ reciters: [{ id: 7, name: 'قارئ بلا روايات', letter: '', moshaf: null }] });
-    qsa('.reciter-head', root)[0].click();
-    await flush();
-    expect(qs('.empty', root).textContent).toBe('لا روايات متاحة لهذا القارئ');
+    expect(qs('.reciter-meta', root).textContent).toBe('بلا روايات');
   });
 
   it('normalizes both sides of the comparison', () => {
@@ -680,17 +587,14 @@ describe('createRecitersView', () => {
     expect(qsa('.reciter', root)).toHaveLength(1);
   });
 
-  it('reveals the expanded reader on request, after the re-render', async () => {
-    const { root, store, view } = build();
-    store.setState({ expandedReciterId: 3 });
+  it('tapping a card reports the reciter for the wiring to resolve', async () => {
+    const { root, onSelectMoshaf } = build();
+    qsa('.reciter', root)[2].click();
     await flush();
-    // Spied on the OPENED card only, so a reveal that scrolled the first card in
-    // the grid, or nothing at all, fails.
-    const spy = vi.fn();
-    qs('.reciter.is-open', root).scrollIntoView = spy;
-    view.reveal();
-    await flush();
-    expect(spy).toHaveBeenCalledWith({ block: 'center' });
+    // The view reports the reciter only; the top filter's riwaya is resolved
+    // downstream, so this view never decides which surah list opens.
+    expect(onSelectMoshaf).toHaveBeenCalledTimes(1);
+    expect(onSelectMoshaf.mock.calls[0][0].id).toBe(3);
   });
 });
 
@@ -940,7 +844,7 @@ describe('createFavoritesView', () => {
     expect(qsa('.surah-place', root).map((n) => n.textContent)).toEqual(['1', '1', '2', '18']);
     expect(qsa('.surah-name', root).map((n) => n.textContent))
       .toEqual(['الفاتحة', 'الفاتحة', 'البقرة', 'الكهف']);
-    expect(qs('.fav-count', root).textContent).toBe('4 سورة');
+    expect(qs('.fav-count', root).textContent).toBe('4 محفوظة');
     // The two surah-1 entries differ only by reciter, which is the tie-break the
     // order exists to make deterministic.
     expect(qsa('.reciter-meta', root).map((n) => n.textContent)).toEqual([
@@ -996,7 +900,7 @@ describe('createFavoritesView', () => {
     store.setState({ query: 'الفاتحة' });
     await flush();
     expect(qsa('.fav', root)).toHaveLength(1);
-    expect(qs('.fav-count', root).textContent).toBe('3 سورة');
+    expect(qs('.fav-count', root).textContent).toBe('3 محفوظة');
     qs('.btn-primary', root).click();
     expect(onPlayAll).toHaveBeenCalled();
   });
@@ -1041,8 +945,8 @@ describe('createRadioView', () => {
     const { root, store, onPlay } = build();
     store.setState({ playback: { kind: 'radio', url: RADIOS[1].url, isPlaying: true } });
     await flush();
-    expect(qsa('.row.is-playing', root)).toHaveLength(1);
-    expect(qs('.row.is-playing .row-name', root).textContent).toBe(RADIOS[1].name);
+    expect(qsa('.row-wrap.is-playing', root)).toHaveLength(1);
+    expect(qs('.row-wrap.is-playing .row-name', root).textContent).toBe(RADIOS[1].name);
     qsa('.row', root)[0].click();
     expect(onPlay).toHaveBeenCalledWith(RADIOS[0]);
   });
@@ -1052,7 +956,7 @@ describe('createRadioView', () => {
     expect(qs('.empty', build({ radios: [] }).root).textContent).toBe('جارٍ تحميل القنوات…');
   });
 
-  it('rebuilds for playback, which it draws, and not for keys it does not', async () => {
+  it('rebuilds for playback and favorites, which it draws, and not for keys it does not', async () => {
     // Node identity is the assertion, not the text: the rows would read exactly
     // the same either way, so only the replacement of the nodes themselves
     // reveals a render that should or should not have happened.
@@ -1061,16 +965,18 @@ describe('createRadioView', () => {
     store.setState({ offline: true });
     await flush();
     expect(qs('.row', root)).toBe(first);
+    // favorites IS drawn here — every row carries a heart — so a gate that
+    // dropped it would leave a stale heart after a toggle elsewhere.
     store.setState({ favorites: [] });
     await flush();
-    expect(qs('.row', root)).toBe(first);
+    expect(qs('.row', root)).not.toBe(first);
     // playback IS drawn here — it is what marks the sounding station — so a gate
     // that dropped it would leave a stale dot on the row that is actually on air.
     store.setState({ playback: { kind: 'radio', url: RADIOS[1].url, isPlaying: true } });
     await flush();
     expect(qs('.row', root)).not.toBe(first);
-    expect(qs('.row.is-playing', root)).not.toBe(null);
-    expect(qs('.row.is-playing .row-name', root).textContent).toBe(RADIOS[1].name);
+    expect(qs('.row-wrap.is-playing', root)).not.toBe(null);
+    expect(qs('.row-wrap.is-playing .row-name', root).textContent).toBe(RADIOS[1].name);
     const playing = qs('.row', root);
     // A surah's playback changes no station's state, but it is still the same
     // key, so the view cannot tell them apart and must repaint.
@@ -1220,75 +1126,64 @@ describe('app wiring', () => {
     expect(app.engine.element.getAttribute('src')).toBe('https://server11.example/001.mp3');
   });
 
-  it('opens only the tapped riwaya’s surahs, never the reader’s first', async () => {
-    // The defect this whole flow exists to prevent: one reader, two riwayas, four
-    // surahs under the first and one under the second. Auto-picking moshaf[0]
-    // would have shown the four and labelled them as the second's.
+  it('opens the top-filter riwaya’s surahs, defaulting to the first with no filter', async () => {
+    // The riwaya comes from the top filter, never from the card: one reader,
+    // two riwayas, four surahs under the first and one under the second.
     app = await boot();
-    qsa('#view-reciters .reciter-head')[2].click();
-    await flush();
-    expect(qsa('.riwaya')).toHaveLength(2);
-
-    qsa('.riwaya')[1].click();
-    await flush();
-    const s = app.store.getState();
-    expect(s.selectedMoshafId).toBe(32);
-    expect(s.selectedMoshaf.reciterName).toBe('ياسر الدوسري');
-    expect(s.selectedMoshaf.reciterId).toBe(3);
-    expect(qsa('#view-surahs .surah')).toHaveLength(1);
-    expect(qs('#view-surahs .surah-name').textContent).toBe('الفاتحة');
-    expect(qs('#view-surahs .surah-where-riwaya').textContent).toBe('رواية حفص عن عاصم مجود');
-    expect(JSON.parse(localStorage.getItem('quran.state.v2')).selectedMoshafId).toBe(32);
+    await chooseMoshaf({ index: 2 });
+    expect(app.store.getState().selectedMoshafId).toBe(31);
+    expect(qsa('#view-surahs .surah')).toHaveLength(4);
+    expect(JSON.parse(localStorage.getItem('quran.state.v2')).selectedMoshafId).toBe(31);
   });
 
-  it('switches between the same reader’s two riwayas without re-picking the reader', async () => {
+  it('switches riwaya from the top filter without re-picking the reader', async () => {
     app = await boot();
-    await chooseMoshaf({ index: 2, riwaya: 0 });
+    await chooseMoshaf({ index: 2 });
     expect(qsa('#view-surahs .surah')).toHaveLength(4);
 
     qs('#view-surahs .btn-ghost').click();
     await flush();
     expect(app.store.getState().activeTab).toBe('reciters');
-    // Back on the readers tab with that same reader already open on its riwayas.
-    expect(app.store.getState().expandedReciterId).toBe(3);
-    expect(qs('.reciter.is-open .reciter-name').textContent).toBe('ياسر الدوسري');
-    expect(qsa('.riwaya')).toHaveLength(2);
-
-    qsa('.riwaya')[1].click();
+    // The top filter is the picker now: seed a riwaya matching only the
+    // second moshaf, tap its chip, then tap the reader.
+    app.store.setState({ riwayat: [{ id: 9, name: 'رواية حفص عن عاصم مجود' }] });
     await flush();
+    const chips = qsa('.riwaya-filter .chip-lg');
+    expect(chips.length).toBeGreaterThan(1);
+    chips[1].click();
+    await flush();
+    expect(qsa('#view-reciters .reciter')).toHaveLength(1);
+    await chooseMoshaf({ index: 0 });
     expect(app.store.getState().selectedMoshafId).toBe(32);
     expect(qsa('#view-surahs .surah')).toHaveLength(1);
   });
 
-  it('remembers the expanded reader across a reload', async () => {
+  it('remembers the riwaya filter across a reload', async () => {
     app = await boot();
-    qsa('#view-reciters .reciter-head')[2].click();
+    const chips = qsa('.riwaya-filter .chip-lg');
+    chips[1].click();
     await flush();
-    expect(JSON.parse(localStorage.getItem('quran.state.v2')).expandedReciterId).toBe(3);
+    const saved = JSON.parse(localStorage.getItem('quran.state.v2')).riwayaFilter;
+    expect(typeof saved).toBe('string');
     app.player.destroy();
     app = null;
 
     app = await boot({ keepStorage: true });
-    expect(app.store.getState().expandedReciterId).toBe(3);
-    expect(qs('.reciter.is-open .reciter-name').textContent).toBe('ياسر الدوسري');
+    expect(app.store.getState().riwayaFilter).toBe(saved);
   });
 
-  it('remembers the tab a riwaya tap opened, not just the one a tab button opens', async () => {
-    // Both tabs come from code as well as from the tab bar: picking a riwaya
+  it('remembers the tab a card tap opened, not just the one a tab button opens', async () => {
+    // Both tabs come from code as well as from the tab bar: picking a reader
     // opens the surahs, and the surah header's change button opens the readers.
-    // Only shell.js knew about its own buttons, so a riwaya tap then a reload
-    // landed back on القرّاء with the chosen reader collapsed.
     app = await boot();
-    await chooseMoshaf({ index: 2, riwaya: 1 });
+    await chooseMoshaf({ index: 2 });
     expect(JSON.parse(localStorage.getItem('quran.state.v2')).activeTab).toBe('surahs');
     app.player.destroy();
     app = null;
 
     app = await boot({ keepStorage: true });
     expect(app.store.getState().activeTab).toBe('surahs');
-    expect(app.store.getState().selectedMoshafId).toBe(32);
-    expect(app.store.getState().expandedReciterId).toBe(3);
-    expect(qsa('#view-surahs .surah')).toHaveLength(1);
+    expect(qsa('#view-surahs .surah')).toHaveLength(4);
 
     // And the other code-driven direction.
     qs('#view-surahs .btn-ghost').click();
@@ -1298,18 +1193,16 @@ describe('app wiring', () => {
 
   it('never nests one button inside another, in any view, in any state', async () => {
     // The whole document, not one view: every card in this app pairs a tappable
-    // target with a second control (a heart, a riwaya), which is exactly the shape
-    // that goes wrong when the wrapper is a button. Checked with a reader open,
-    // because that is the only state that adds a third.
+    // target with a second control (a heart), which is exactly the shape that
+    // goes wrong when the wrapper is a button.
     app = await boot();
-    await chooseMoshaf({ index: 2, riwaya: 0 });
+    await chooseMoshaf({ index: 2 });
     qs('#view-surahs .surah .heart').click();
     await flush();
     qs('.tab[data-tab="favorites"]').click();
     qs('.tab[data-tab="radio"]').click();
     await flush();
     expect(qsa('.fav')).toHaveLength(1);
-    expect(qsa('.riwaya')).toHaveLength(2);
     expectNoNestedButtons(document.body);
     // Sanity: the walk is looking at something, so an empty pass cannot pass.
     expect(qsa('button', document.body).length).toBeGreaterThan(10);
@@ -1531,7 +1424,7 @@ describe('app wiring', () => {
     // button only work if reciterId rides along with the resolved moshaf.
     const open = holdRequests();
     localStorage.setItem('quran.cache.v2', JSON.stringify({
-      reciters: cacheOf([reciter(9, 'قارئ محفوظ', moshaf(99))]),
+      reciters: cacheOf([reciter(9, 'قارئ مؤقت', moshaf(99))]),
       suwar: cacheOf(SUWAR),
     }));
     app = await boot({ keepStorage: true });
@@ -1541,13 +1434,13 @@ describe('app wiring', () => {
     await flush();
     expect(app.moshafOf(11)).toMatchObject({ reciterId: 1, reciterName: 'أحمد العكش' });
     expect(app.moshafOf(99)).toBe(null);
-    // And the path that depends on it: pick a riwaya, then change it from the
+    // And the path that depends on it: pick a reader, then change from the
     // surah header.
-    await chooseMoshaf({ index: 2, riwaya: 1 });
+    await chooseMoshaf({ index: 2 });
+    expect(app.store.getState().selectedMoshaf.reciterId).toBe(3);
     qs('#view-surahs .btn-ghost').click();
     await flush();
-    expect(app.store.getState().expandedReciterId).toBe(3);
-    expect(qs('.reciter.is-open .reciter-name').textContent).toBe('ياسر الدوسري');
+    expect(app.store.getState().activeTab).toBe('reciters');
   });
 
   it('hands setState a new favorites array so the change is announced', async () => {

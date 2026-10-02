@@ -24,7 +24,7 @@ import { createSurahsView } from './ui/surahs.js';
 import { createFavoritesView } from './ui/favorites.js';
 import { createRadioView } from './ui/radio.js';
 import { createPlayer } from './ui/player.js';
-import { toggleFavorite, isFavorite, sortForPlayback } from './utils/favorites.js';
+import { toggleFavorite, isFavorite, isRadioFavorite, sortForPlayback } from './utils/favorites.js';
 import { h, qs } from './utils/dom.js';
 
 const UNAVAILABLE = 'هذه السورة غير متوفرة لهذا القارئ';
@@ -53,11 +53,6 @@ const store = createStore({
   riwayat: [],
   radios: [],
   selectedMoshafId: saved.selectedMoshafId ?? null,
-  // The reader whose riwayas are on screen. Restored so the surahs tab's change
-  // button lands on an already-expanded card, but only when the stored id is a
-  // number: a hand-edited string would never match a reciter id and would leave
-  // the view permanently collapsed with nothing to show for it.
-  expandedReciterId: Number.isFinite(saved.expandedReciterId) ? saved.expandedReciterId : null,
   // The riwaya chip filter. A name, not an id: moshaf entries carry no riwaya
   // id, so the filter matches by containment and the stored value must be the
   // same string the filter compares against.
@@ -218,6 +213,24 @@ function playQueueItem(item) {
 
   if (item.fav) {
     const fav = item.fav;
+    // A radio favorite plays as a station, not a surah — but WITHOUT going
+    // through playRadio, which would replace the mixed queue with the station
+    // list and strand the entries after it. Same playback shape, queue intact.
+    if (fav.kind === 'radio') {
+      store.setState({
+        playback: {
+          kind: 'radio', url: item.url, title: fav.stationName,
+          reciterName: 'بث مباشر', isPlaying: true,
+          isFavorite: isRadioFavorite(store.getState().favorites, fav.url),
+          seekable: false, error: null,
+        },
+      });
+      engine.play({
+        url: item.url, title: fav.stationName, artist: 'بث مباشر',
+        kind: 'radio', seekable: false,
+      });
+      return;
+    }
     store.setState({
       playback: {
         kind: 'surah', surahId: fav.surahId, moshafId: fav.moshafId, url: item.url,
@@ -259,7 +272,8 @@ function playRadio(radio) {
   store.setState({
     playback: {
       kind: 'radio', url: radio.url, title: radio.name,
-      reciterName: 'بث مباشر', isPlaying: true, isFavorite: false,
+      reciterName: 'بث مباشر', isPlaying: true,
+      isFavorite: isRadioFavorite(store.getState().favorites, radio.url),
       seekable: false, error: null,
     },
   });
@@ -280,6 +294,14 @@ function playRadio(radio) {
  * through the same playQueueItem, so there is one rule and not two.
  */
 function playFavorite(fav) {
+  // Stations skip the moshaf entirely: they carry their own URL and need no
+  // reciter, playlist, or surah_list.
+  if (fav.kind === 'radio') {
+    queue.setPlaylist([{ title: fav.stationName, url: fav.url, fav }]);
+    queueBinding = { kind: 'favorites', length: 1 };
+    playQueueItem(queue.current);
+    return;
+  }
   if (!moshafOf(fav.moshafId)) {
     showToast(GONE);
     return;
@@ -304,8 +326,10 @@ function playFavorite(fav) {
  * reciter the API has dropped resolves to nothing. surahUrl('') would produce
  * the relative path "018.mp3", which resolves against the app's own origin and
  * 404s — so an entry with no usable server is left out of the queue instead.
+ * Stations carry their own URL and skip all of this.
  */
 function favoriteUrl(fav) {
+  if (fav.kind === 'radio') return fav.url || '';
   const server = fav.server || moshafOf(fav.moshafId)?.server;
   return server ? surahUrl(server, fav.surahId) : '';
 }
@@ -327,9 +351,10 @@ function playAllFavorites() {
   }
 
   // One queue built from the saved URLs, because these entries cross reciters
-  // and no single moshaf's playlist can hold them.
+  // — and now cross kinds, since stations ride along — and no single moshaf's
+  // playlist can hold them.
   queue.setPlaylist(ordered.map(({ fav, url }) => ({
-    surahId: fav.surahId, title: fav.surahName, url, fav,
+    surahId: fav.surahId, title: fav.stationName || fav.surahName, url, fav,
   })));
   queueBinding = { kind: 'favorites', length: ordered.length };
   playQueueItem(queue.current);
@@ -398,9 +423,30 @@ function toggleSurah(surahId, moshafId) {
   showToast(stillFav ? 'أُضيفت إلى المفضلة' : 'أُزيلت من المفضلة');
 }
 
+function toggleRadio(url, stationName) {
+  if (!url) return;
+  const s = store.getState();
+  // toggleFavorite returns a new array. Same Object.is reason as toggleSurah:
+  // mutating in place would hand setState the reference it already holds.
+  const next = toggleFavorite(s.favorites, { kind: 'radio', url, stationName });
+  const stillFav = isRadioFavorite(next, url);
+  writeState({ favorites: next });
+  store.setState({
+    favorites: next,
+    playback: s.playback?.kind === 'radio' && s.playback?.url === url
+      ? { ...s.playback, isFavorite: stillFav }
+      : s.playback,
+  });
+  showToast(stillFav ? 'أُضيفت إلى المفضلة' : 'أُزيلت من المفضلة');
+}
+
 function toggleCurrentFavorite() {
   const p = store.getState().playback;
-  if (!p || p.kind !== 'surah') return;
+  if (!p) return;
+  if (p.kind === 'radio') {
+    toggleRadio(p.url, p.title);
+    return;
+  }
   toggleSurah(p.surahId, p.moshafId);
 }
 
@@ -419,10 +465,16 @@ createSearch({ store });
 const reciters = createRecitersView({
   root: qs('#view-reciters'),
   store,
-  // Explicit riwaya choice, per the user: the surah list depends on which riwaya
-  // is selected — the same reader ships 114 surahs under one and 38 under
-  // another — so the reader's first riwaya is never auto-selected here.
-  onSelectMoshaf(_reciter, moshaf) {
+  // One tap: the riwaya comes from the top filter, because the surah list
+  // belongs to the (reader, riwaya) pair and the card no longer offers the
+  // choice. With no filter active the reader's first riwaya is the default,
+  // and the surahs header always names what is open with a change button.
+  onSelectMoshaf(reciter) {
+    const moshafs = Array.isArray(reciter.moshaf) ? reciter.moshaf : [];
+    const filter = store.getState().riwayaFilter;
+    const moshaf = (filter && moshafs.find((m) => (m.name || '').includes(filter))) ||
+      moshafs[0];
+    if (!moshaf) return;
     // The query served its purpose (finding the reader), so it is cleared:
     // leaving a reader name in the box would filter the surah grid down to
     // nothing, since no surah name contains it.
@@ -436,11 +488,9 @@ createSurahsView({
   root: qs('#view-surahs'), store,
   onPlay: (id) => playSurah(id),
   onToggleFavorite: (id) => toggleSurah(id, store.getState().selectedMoshafId),
-  onChangeReciter(reciterId) {
-    // Back to the readers tab with that reader already expanded, so switching
-    // riwaya is one tap instead of hunting for the reader among 241 cards again.
-    store.setState({ expandedReciterId: reciterId, activeTab: 'reciters' });
-    reciters.reveal();
+  onChangeReciter() {
+    // Back to the readers tab, where the top filter is the riwaya picker.
+    store.setState({ activeTab: 'reciters' });
   },
 });
 
@@ -452,7 +502,10 @@ createFavoritesView({
   onBrowse: () => store.setState({ activeTab: 'surahs' }),
 });
 
-createRadioView({ root: qs('#view-radio'), store, onPlay: playRadio });
+createRadioView({
+  root: qs('#view-radio'), store, onPlay: playRadio,
+  onToggleFavorite: (r) => toggleRadio(r.url, r.name),
+});
 
 // Registered at bootstrap, not after the first play, so the lock-screen buttons
 // exist before any audio has started.
@@ -523,7 +576,6 @@ addEventListener('offline', () => store.setState({ offline: true }));
 // writeState merges, so the duplicate write is idempotent.
 store.subscribe((s, keys) => {
   if (keys.has('activeTab')) writeState({ activeTab: s.activeTab });
-  if (keys.has('expandedReciterId')) writeState({ expandedReciterId: s.expandedReciterId });
   if (keys.has('riwayaFilter')) writeState({ riwayaFilter: s.riwayaFilter });
   if (keys.has('radioCategory')) writeState({ radioCategory: s.radioCategory });
 });
