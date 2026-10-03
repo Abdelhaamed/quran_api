@@ -304,7 +304,12 @@
    tall desktop screen. */
 .empty { color: var(--text-muted); text-align: center; padding: var(--sp-6) var(--sp-4);
   display: grid; gap: var(--sp-4); justify-items: center; align-content: center;
-  min-block-size: 40svh; }
+  min-block-size: 40svh;
+  /* Empty states render INSIDE their grid (.grid-fav, .grid-surahs, .list),
+     so without this they occupy a single track at the inline start while the
+     text-align centers only within that narrow column. Spanning all tracks
+     puts the message in the true middle of the screen. */
+  grid-column: 1 / -1; }
 .fav-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
 .fav-count { font-size: var(--fs-sm); color: var(--text-muted); font-weight: 400; }
 .btn-primary { min-block-size: var(--tap); padding-inline: var(--sp-4); border-radius: var(--r-full);
