@@ -1,5 +1,6 @@
 import { h } from '../utils/dom.js';
 import { icon, setIcon } from './icons.js';
+import { formatBytes } from '../audio/downloads.js';
 
 // The engine's `time` event rides the element's `timeupdate`, whose cadence the
 // browser chooses and throttles: it is not guaranteed while a page is
@@ -30,6 +31,9 @@ export function createPlayer({
   onNext = () => {},
   onPrev = () => {},
   onToggleFavorite = () => {},
+  onDownload = () => {},
+  onDeleteDownload = () => {},
+  isDownloaded = () => false,
 }) {
   // Positioning is the player's own business: the caller may pass a bare div
   // and the fixed-player CSS still applies.
@@ -37,6 +41,8 @@ export function createPlayer({
 
   const els = {
     heart: h('button', { class: 'pl-btn pl-heart', type: 'button', 'aria-label': 'إضافة إلى المفضلة', 'aria-pressed': 'false' }, icon('heart')),
+    dl: h('button', { class: 'pl-btn pl-dl', type: 'button', 'aria-label': 'تحميل السورة للاستماع بلا إنترنت' }, icon('download')),
+    dlState: h('span', { class: 'pl-dl-state', 'aria-hidden': 'true' }),
     title: h('div', { class: 'pl-title' }),
     sub: h('div', { class: 'pl-sub' }),
     time: h('span', { class: 'pl-time', dir: 'ltr' }, '0:00'),
@@ -66,7 +72,7 @@ export function createPlayer({
     h('div', { class: 'pl-inner' },
       h('div', { class: 'pl-head' },
         h('div', { class: 'pl-names' }, els.title, els.sub),
-        els.heart),
+        els.dlState, els.dl, els.heart),
       seekRow, controls),
   );
   root.hidden = true;
@@ -76,6 +82,45 @@ export function createPlayer({
   els.fwd.addEventListener('click', () => engine.seekBy(10));
   els.prev.addEventListener('click', () => onPrev());
   els.next.addEventListener('click', () => onNext());
+
+  // Download progress lives here, not in the store: chunks arrive dozens of
+  // times per second, and every store write re-renders all four views. Local
+  // DOM writes keep the percentage live with zero render churn; the store is
+  // touched once, on completion, via the downloadsRev bump in main.js.
+  let dlBusy = false;
+  els.dl.addEventListener('click', () => {
+    const p = store.getState().playback;
+    if (!p || p.kind !== 'surah' || dlBusy) return;
+    if (isDownloaded(p.surahId, p.moshafId)) onDeleteDownload();
+    else onDownload();
+  });
+
+  function paintDownload(p, downloaded) {
+    const isSurah = p?.kind === 'surah';
+    els.dl.hidden = !isSurah;
+    els.dlState.hidden = !isSurah;
+    if (!isSurah) return;
+    if (dlBusy) return; // progress writes own the button while busy
+    setGlyph(els.dl, downloaded ? 'downloaded' : 'download');
+    els.dl.classList.toggle('is-on', downloaded);
+    els.dl.setAttribute('aria-label', downloaded
+      ? 'محمّلة — اضغط للحذف'
+      : 'تحميل السورة للاستماع بلا إنترنت');
+    els.dlState.textContent = downloaded ? '✓' : '';
+  }
+
+  // Called by main.js per progress chunk. Direct DOM writes, no store traffic.
+  function downloadProgress(received, total) {
+    els.dlState.textContent = total
+      ? `${Math.round((received / total) * 100)}٪`
+      : `${formatBytes(received)}`;
+  }
+
+  function downloadBusy(busy) {
+    dlBusy = busy;
+    els.dl.setAttribute('aria-busy', String(busy));
+    if (!busy) els.dlState.textContent = '';
+  }
   els.repeat.addEventListener('click', () => {
     const next = store.getState().repeat === 'one' ? 'off' : 'one';
     store.setState({ repeat: next });
@@ -203,12 +248,14 @@ export function createPlayer({
     els.heart.classList.toggle('is-on', favorite);
     els.heart.setAttribute('aria-pressed', String(favorite));
 
+    paintDownload(p, p?.kind === 'surah' && isDownloaded(p.surahId, p.moshafId));
+
     paintClock(readClock());
     measure();
   }
 
   const unsubscribe = store.subscribe((_state, keys) => {
-    if (keys.has('playback') || keys.has('repeat')) render();
+    if (keys.has('playback') || keys.has('repeat') || keys.has('downloadsRev')) render();
   }, { immediate: true });
 
   function destroy() {
@@ -220,5 +267,5 @@ export function createPlayer({
     reserve(HIDDEN_RESERVE);
   }
 
-  return { render, destroy, root };
+  return { render, destroy, root, downloadProgress, downloadBusy };
 }

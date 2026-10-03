@@ -2,6 +2,7 @@ import { h, frag } from '../utils/dom.js';
 import { matchesAll } from '../utils/arabic.js';
 import { isFavorite } from '../utils/favorites.js';
 import { AYAH_COUNTS } from '../utils/ayah-counts.js';
+import { isDownloaded } from '../audio/downloads.js';
 import { icon } from './icons.js';
 
 const NOT_PICKED = 'اختر قارئاً ثم روايته من تبويب «القرّاء»';
@@ -97,7 +98,14 @@ export function createSurahsView({ root, store, onPlay, onToggleFavorite, onChan
         onclick: (e) => { e.stopPropagation(); onToggleFavorite(id); },
       }, icon(fav ? 'heartOn' : 'heart'));
 
-      return h('div', { class: `card surah${isNow ? ' is-playing' : ''}` }, open, heart);
+      // A downloaded surah carries a ✓ beside the heart so the offline state is
+      // visible where the user browses, not only in the player. Read from the
+      // registry (synchronous) rather than the cache, so render stays sync.
+      const dl = isDownloaded(id, moshaf.id)
+        ? h('span', { class: 'dl-badge', title: 'محمّلة — تعمل بلا إنترنت' }, '✓')
+        : null;
+
+      return h('div', { class: `card surah${isNow ? ' is-playing' : ''}` }, open, heart, dl);
     });
 
     grid.replaceChildren(frag(nodes));
@@ -105,7 +113,7 @@ export function createSurahsView({ root, store, onPlay, onToggleFavorite, onChan
 
   const unsubscribe = store.subscribe((_s, keys) => {
     if (keys.has('selectedMoshaf') || keys.has('query') || keys.has('favorites') ||
-        keys.has('playback') || keys.has('suwarById')) render();
+        keys.has('playback') || keys.has('suwarById') || keys.has('downloadsRev')) render();
   }, { immediate: true });
 
   return { render, destroy: unsubscribe };

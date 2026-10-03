@@ -24,6 +24,10 @@ import { createSurahsView } from './ui/surahs.js';
 import { createFavoritesView } from './ui/favorites.js';
 import { createRadioView } from './ui/radio.js';
 import { createPlayer } from './ui/player.js';
+import {
+  isDownloaded, downloadSurah, deleteDownload, reconcileDownloads,
+  downloadedBytes, formatBytes,
+} from './audio/downloads.js';
 import { initPWA } from './pwa.js';
 import { toggleFavorite, isFavorite, isRadioFavorite, sortForPlayback } from './utils/favorites.js';
 import { h, qs } from './utils/dom.js';
@@ -59,6 +63,10 @@ const store = createStore({
   // same string the filter compares against.
   riwayaFilter: typeof saved.riwayaFilter === 'string' ? saved.riwayaFilter : null,
   radioCategory: typeof saved.radioCategory === 'string' ? saved.radioCategory : 'all',
+  // Ephemeral revision counter for the download registry. The registry lives
+  // in localStorage (not the store) so progress writes don't re-render views;
+  // this bump is the single notification that badges and meters repaint on.
+  downloadsRev: 0,
   selectedMoshaf: null,
   playback: null,
   repeat: saved.repeat === 'one' ? 'one' : 'off',
@@ -458,7 +466,67 @@ const player = createPlayer({
   onNext: advance,
   onPrev: previous,
   onToggleFavorite: toggleCurrentFavorite,
+  onDownload: startDownload,
+  onDeleteDownload: confirmDeleteDownload,
+  isDownloaded,
 });
+
+// Bump so badge and meter views repaint. Kept as a bare counter, not the
+// registry itself: the registry object identity never changes in a way the
+// store's Object.is comparison would notice, and snapshots of it would go
+// stale across tabs.
+function bumpDownloads() {
+  const s = store.getState();
+  store.setState({ downloadsRev: (s.downloadsRev || 0) + 1 });
+}
+
+let dlAbort = null;
+
+async function startDownload() {
+  const p = store.getState().playback;
+  if (!p || p.kind !== 'surah' || !p.url) return;
+  if (isDownloaded(p.surahId, p.moshafId)) return;
+  const s = store.getState();
+  const moshaf = moshafOf(p.moshafId);
+  const meta = s.suwarById.get(p.surahId);
+  player.downloadBusy(true);
+  player.downloadProgress(0, null);
+  dlAbort = new AbortController();
+  try {
+    await downloadSurah(
+      {
+        url: p.url, surahId: p.surahId, moshafId: p.moshafId,
+        surahName: meta?.name || p.title,
+        reciterName: moshaf?.reciterName || p.reciterName || '',
+      },
+      (received, total) => player.downloadProgress(received, total),
+      dlAbort.signal,
+    );
+    showToast(`تم التحميل · المحمّل: ${formatBytes(downloadedBytes())}`, { ms: 2600 });
+  } catch (err) {
+    if (err?.name !== 'AbortError') {
+      showToast('تعذّر التحميل. تحقق من الاتصال وحاول مجدداً.', { ms: 2600 });
+    }
+  } finally {
+    dlAbort = null;
+    player.downloadBusy(false);
+    bumpDownloads();
+  }
+}
+
+function confirmDeleteDownload() {
+  const p = store.getState().playback;
+  if (!p || p.kind !== 'surah') return;
+  showToast('حذف السورة المحمّلة؟', {
+    ms: 6000,
+    action: 'حذف',
+    onAction: async () => {
+      await deleteDownload(p.surahId, p.moshafId, p.url);
+      bumpDownloads();
+      showToast('حُذفت النسخة المحمّلة', { ms: 2000 });
+    },
+  });
+}
 
 const shell = createShell({ store });
 createSearch({ store });
@@ -644,6 +712,11 @@ async function loadData() {
 }
 
 loadData();
+
+// Drops registry entries whose bytes are gone (user cleared site data, or the
+// browser evicted under pressure). Without it a cleared file keeps its ✓
+// badge forever, pointing at a cache entry that 404s internally.
+reconcileDownloads().then(() => bumpDownloads()).catch(() => {});
 
 /**
  * Exported so test/ui.test.js can drive the wiring — the store, the queue, and

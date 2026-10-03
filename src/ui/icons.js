@@ -47,6 +47,8 @@ const ICONS = {
   moon: moonFill,
   sun: sunFill,
   install: downloadIcon,
+  download: downloadIcon,
+  downloaded: downloadIcon,
   chevronDown,
   chevronUp,
   broadcast: broadcastIcon,

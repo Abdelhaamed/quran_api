@@ -33,8 +33,11 @@ const setup = (state = {}) => {
   const root = h('div', { class: 'pl' });
   document.body.appendChild(root);
   const engine = fakeEngine();
-  const store = createStore({ playback: null, repeat: 'off', theme: 'dark', ...state });
-  const calls = { onNext: vi.fn(), onPrev: vi.fn(), onToggleFavorite: vi.fn() };
+  const store = createStore({ playback: null, repeat: 'off', theme: 'dark', downloadsRev: 0, ...state });
+  const calls = {
+    onNext: vi.fn(), onPrev: vi.fn(), onToggleFavorite: vi.fn(),
+    onDownload: vi.fn(), onDeleteDownload: vi.fn(),
+  };
 
   // happy-dom has no layout, so the measured height is stubbed. The point of the
   // stub is that it is UNRELATED to `hidden`: a measurement taken while the
@@ -309,6 +312,7 @@ describe('player controls', () => {
     }
     expect(labels).toEqual({
       'pl-heart': 'إضافة إلى المفضلة',
+      'pl-dl': 'تحميل السورة للاستماع بلا إنترنت',
       'pl-play': 'تشغيل',
       'pl-prev': 'السورة السابقة',
       'pl-next': 'السورة التالية',
@@ -348,7 +352,7 @@ describe('player controls', () => {
   it('keeps every glyph hidden from assistive tech', () => {
     const t = setup({ playback: track() });
     const buttons = [...t.root.querySelectorAll('button')];
-    expect(buttons).toHaveLength(7);
+    expect(buttons).toHaveLength(8);
     for (const b of buttons) {
       // The icon is an inline SVG, so the button's text content is empty and
       // the assertion is on the SVG's presence and its hiding, not on text.

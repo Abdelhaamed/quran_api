@@ -24,6 +24,20 @@ export default defineConfig({
   },
   plugins: [
     VitePWA({
+      // injectManifest, not generateSW: the audio download feature needs a
+      // hand-written service worker (RangeRequestsPlugin on the audio route
+      // plus a message port), which generateSW cannot express. The routes in
+      // src/sw.js mirror the old generateSW config one for one.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.js',
+      // NOTE: under injectManifest the manifest globs live HERE, not under
+      // `workbox` (those are generateSW-only and silently ignored). The
+      // default injectManifest glob covers only js/css/html, which is how the
+      // fonts and icons went missing from the precache unnoticed.
+      injectManifest: {
+        globPatterns: ['**/*.{js,css,html,svg,woff2,png}'],
+      },
       registerType: 'prompt',
       injectRegister: false,
       // globPatterns already matches everything in public/, so letting the
@@ -48,70 +62,10 @@ export default defineConfig({
           { src: 'icons/maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,woff2,png}'],
-        cleanupOutdatedCaches: true,
-        // Both keys below must be explicit. vite-plugin-pwa defaults
-        // navigateFallback to 'index.html', so merely omitting it still emits a
-        // NavigationRoute ahead of runtimeCaching and shadows the pages-v1 route.
-        navigateFallback: null,
-        // Navigations are NetworkFirst with a 3s timeout so a fresh shell is
-        // picked up after a deploy. CacheFirst would pin the old index.html for
-        // the full maxAgeSeconds, because cleanupOutdatedCaches only removes
-        // caches whose name contains '-precache-' and so never prunes
-        // pages-v1/api-v1/assets-v1 across service-worker versions.
-        runtimeCaching: [
-          {
-            urlPattern: ({ url, request }) =>
-              request.mode === 'navigate' &&
-              url.origin === self.location.origin,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'pages-v1',
-              networkTimeoutSeconds: 3,
-              expiration: { maxEntries: 4, maxAgeSeconds: 604800 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            // The predicate below is serialized into sw.js and evaluated in
-            // the service worker, so it may NOT close over a build-time
-            // constant: it would become a free variable and throw
-            // ReferenceError on every request. Inline the literal.
-            //
-            // hostname is used rather than origin.endsWith, because
-            // `https://notmp3quran.net` also ends with 'mp3quran.net'.
-            // The .mp3 exclusion makes "audio is never cached" structural
-            // rather than incidental: surah audio lives on
-            // server*.mp3quran.net, which WOULD otherwise match this rule.
-            // Lowercased so a .MP3 cannot slip past the exclusion.
-            urlPattern: ({ url }) =>
-              (url.hostname === 'mp3quran.net' || url.hostname.endsWith('.mp3quran.net')) &&
-              !url.pathname.toLowerCase().endsWith('.mp3'),
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'api-v1',
-              expiration: { maxEntries: 12, maxAgeSeconds: 86400 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            urlPattern: ({ request, url }) =>
-              url.origin === self.location.origin &&
-              ['style', 'script', 'worker', 'font', 'image'].includes(request.destination),
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'assets-v1',
-              expiration: { maxEntries: 60, maxAgeSeconds: 2592000 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-        ],
-        // Audio is never cached. mp3quran audio lives on server*.mp3quran.net,
-        // which the api-v1 predicate matches by hostname — the case-insensitive
-        // .mp3 exclusion above is what excludes it. backup.qurango.net radio
-        // streams match no route at all. Do not add a route for either.
-      },
+      // Under injectManifest only the injectManifest block above is read (to
+      // build the precache manifest injected as self.__WB_MANIFEST). Every
+      // route lives as code in src/sw.js instead — generateSW cannot express
+      // the audio route's RangeRequestsPlugin or the message port.
     }),
   ],
 });

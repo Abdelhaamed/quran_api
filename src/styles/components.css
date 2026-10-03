@@ -274,6 +274,10 @@
   inline-size: var(--tap); block-size: var(--tap); font-size: var(--fs-lg);
   color: var(--text-faint); display: grid; place-items: center; }
 .heart.is-on { color: var(--danger); }
+/* Downloaded badge: sits opposite the heart so the two never collide. */
+.dl-badge { position: absolute; inset-block-start: var(--sp-1); inset-inline-start: var(--sp-1);
+  inline-size: var(--tap); block-size: var(--tap); display: grid; place-items: center;
+  color: var(--accent-strong); font-weight: 700; font-size: var(--fs-base); }
 
 .list { display: grid; gap: var(--sp-2); }
 /* One station per row on the phone; a filling grid on larger screens, matching
@@ -312,6 +316,7 @@
   grid-column: 1 / -1; }
 .fav-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
 .fav-count { font-size: var(--fs-sm); color: var(--text-muted); font-weight: 400; }
+.dl-meter { font-size: var(--fs-xs); color: var(--text-faint); }
 .btn-primary { min-block-size: var(--tap); padding-inline: var(--sp-4); border-radius: var(--r-full);
   background: var(--accent); color: var(--accent-contrast); font-weight: 600; }
 .btn-primary:hover { background: var(--accent-strong); }
