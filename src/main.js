@@ -505,7 +505,19 @@ async function startDownload() {
     showToast(`تم التحميل · المحمّل: ${formatBytes(downloadedBytes())}`, { ms: 2600 });
   } catch (err) {
     if (err?.name !== 'AbortError') {
-      showToast('تعذّر التحميل. تحقق من الاتصال وحاول مجدداً.', { ms: 2600 });
+      // Quota gets its own message: telling the user to "check the
+      // connection" when the disk is full sends them down the wrong path.
+      // InsecureContext likewise: the LAN preview server runs plain HTTP,
+      // where Cache Storage does not exist at all — the live HTTPS site is
+      // where downloads actually work.
+      // The stage suffix (cache-put vs registry) names the failing step.
+      const where = err?.stage ? ` [${err.stage}]` : '';
+      const detail = err?.name === 'QuotaExceededError'
+        ? `مساحة التخزين ممتلئة. احذف سورة محمّلة وحاول مجدداً.${where}`
+        : err?.name === 'InsecureContext'
+          ? 'التحميل يعمل على الموقع الحي المشفّر فقط، لا على نسخة التجربة المحلية.'
+          : `تعذّر التحميل. تحقق من الاتصال وحاول مجدداً. (${err?.name || 'خطأ'}${where})`;
+      showToast(detail, { ms: 5000 });
     }
   } finally {
     dlAbort = null;

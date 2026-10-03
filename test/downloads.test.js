@@ -77,6 +77,17 @@ describe('formatBytes', () => {
 });
 
 describe('downloadSurah', () => {
+  it('refuses immediately outside a secure context, before any fetch', async () => {
+    // Cache Storage does not exist on plain-HTTP LAN origins, so without this
+    // guard the download streams to 100% and then throws on caches.open,
+    // blaming the connection for a missing API.
+    delete globalThis.caches;
+    const spy = vi.fn();
+    globalThis.fetch = spy;
+    await expect(downloadSurah(ENTRY)).rejects.toMatchObject({ name: 'InsecureContext' });
+    expect(spy).not.toHaveBeenCalled();
+    installCacheStub();
+  });
   it('stores the bytes and registers the entry with progress', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(mp3Response('x'.repeat(100)));
     const seen = [];

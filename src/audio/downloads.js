@@ -3,6 +3,18 @@ import { readState, writeState } from '../state/persist.js';
 export const AUDIO_CACHE = 'audio-v1';
 const KEY = 'downloads';
 
+// Cache Storage is gated behind secure contexts: it exists on localhost and
+// HTTPS, but NOT on plain-HTTP LAN addresses like the phone preview server.
+// Without this guard the download streams to 100% and then throws on
+// caches.open, blaming the connection for what is actually a missing API.
+function assertCacheAvailable() {
+  if (typeof caches === 'undefined') {
+    const err = new Error('Cache Storage unavailable outside a secure context');
+    err.name = 'InsecureContext';
+    throw err;
+  }
+}
+
 // Registry shape: { [downloadKey]: { surahId, moshafId, surahName,
 // reciterName, url, size, at } }. Bytes live in Cache Storage under the URL;
 // this index is what the UI reads synchronously to paint badges without
@@ -78,6 +90,7 @@ export async function requestPersistence() {
  * registry entry and no partial cache entry behind.
  */
 export async function downloadSurah({ url, surahId, moshafId, surahName, reciterName }, onProgress, signal, { maxAttempts = 3 } = {}) {
+  assertCacheAvailable();
   const key = downloadKey(surahId, moshafId);
   let chunks = [];
   let received = 0;
@@ -137,17 +150,37 @@ export async function downloadSurah({ url, surahId, moshafId, surahName, reciter
 
   if (lastError) throw lastError;
 
-  const headers = new Headers({ 'content-type': contentType, 'content-length': String(received) });
-  const cache = await caches.open(AUDIO_CACHE);
-  await cache.put(url, new Response(new Blob(chunks, { type: contentType }), { headers }));
-  const reg = readRegistry();
-  reg[key] = { surahId, moshafId, surahName, reciterName, url, size: received, at: Date.now() };
-  writeRegistry(reg);
+  // The bytes are all here (progress hit 100%), so any failure below is in
+  // STORING, not fetching. Each step throws a tagged error naming itself, so
+  // the toast can tell "disk full" from "cache broken" instead of blaming the
+  // connection for a storage failure.
+  let stored = false;
+  try {
+    const headers = new Headers({ 'content-type': contentType, 'content-length': String(received) });
+    const cache = await caches.open(AUDIO_CACHE);
+    await cache.put(url, new Response(new Blob(chunks, { type: contentType }), { headers }));
+    stored = true;
+    const reg = readRegistry();
+    reg[key] = { surahId, moshafId, surahName, reciterName, url, size: received, at: Date.now() };
+    writeRegistry(reg);
+  } catch (err) {
+    if (stored) {
+      err.stage = 'registry';
+    } else {
+      err.stage = 'cache-put';
+      try {
+        const cache = await caches.open(AUDIO_CACHE);
+        await cache.delete(url);
+      } catch { /* best effort cleanup of a partial entry */ }
+    }
+    throw err;
+  }
   await requestPersistence();
   return { key, size: received };
 }
 
 export async function deleteDownload(surahId, moshafId, url) {
+  assertCacheAvailable();
   const key = downloadKey(surahId, moshafId);
   try {
     const cache = await caches.open(AUDIO_CACHE);
