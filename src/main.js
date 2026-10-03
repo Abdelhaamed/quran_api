@@ -25,6 +25,7 @@ import { createFavoritesView } from './ui/favorites.js';
 import { createDownloadsView } from './ui/downloads.js';
 import { createRadioView } from './ui/radio.js';
 import { createPlayer } from './ui/player.js';
+import { preconnectServer, preloadNext } from './audio/prefetch.js';
 import {
   isDownloaded, downloadSurah, deleteDownload, reconcileDownloads,
   downloadedBytes, formatBytes,
@@ -139,8 +140,12 @@ function bindMoshafQueue({ force = false } = {}) {
 }
 
 function resolveMoshaf() {
-  store.setState({ selectedMoshaf: moshafOf(store.getState().selectedMoshafId) });
+  const moshaf = moshafOf(store.getState().selectedMoshafId);
+  store.setState({ selectedMoshaf: moshaf });
   bindMoshafQueue();
+  // Warm DNS+TLS for the reciter's server now, while the user is still
+  // browsing surahs, so the first tap does not pay for the handshake.
+  if (moshaf?.server) preconnectServer(moshaf.server);
 }
 
 let toastTimer = 0;
@@ -658,7 +663,21 @@ function patchPlaying(isPlaying) {
   store.setState({ playback: { ...p, isPlaying } });
 }
 
-engine.on('track', (item) => session.update({ ...item, isPlaying: !engine.element.paused }));
+engine.on('track', (item) => {
+  session.update({ ...item, isPlaying: !engine.element.paused });
+  // Quran listening is sequential: warm the most likely next file now, while
+  // this one plays, so a tap, auto-advance, or replay finds head bytes local.
+  // Radio items carry a station object and no url, so they can never match
+  // here — preloading an infinite live stream would download forever.
+  try {
+    const items = queue.items;
+    const at = queue.index;
+    const next = items[at + 1];
+    if (next?.url && next.url !== item?.url) preloadNext(next.url);
+  } catch {
+    /* queue shape varies by binding; never let prefetch break playback */
+  }
+});
 engine.on('play', () => {
   session.setState(true);
   patchPlaying(true);
