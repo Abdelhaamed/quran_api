@@ -114,6 +114,92 @@ describe('downloadSurah', () => {
     await expect(downloadSurah(ENTRY, null, controller.signal)).rejects.toThrow();
     expect(isDownloaded(1, 11)).toBe(false);
   });
+
+  it('resumes a dropped connection with a Range request instead of restarting', async () => {
+    // First attempt streams 3 bytes then drops; the second must ask for the
+    // rest, not the whole file again. The drop is modelled with pull(), not
+    // start(): erroring inside start() discards the queued chunk, which no
+    // real network drop does — bytes already read stay read.
+    const full = 'x'.repeat(10);
+    const seen = [];
+    let calls = 0;
+    globalThis.fetch = vi.fn().mockImplementation((url, { headers } = {}) => {
+      calls += 1;
+      seen.push(headers?.Range || '(fresh)');
+      if (calls === 1) {
+        let pulled = false;
+        return Promise.resolve({
+          ok: true, status: 200,
+          headers: new Headers({ 'content-type': 'audio/mpeg', 'content-length': '10' }),
+          body: new ReadableStream({
+            start(c) { c.enqueue(new TextEncoder().encode('xxx')); },
+            pull(c) { if (!pulled) { pulled = true; c.error(new TypeError('dropped')); } else c.close(); },
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true, status: 206,
+        headers: new Headers({
+          'content-type': 'audio/mpeg', 'content-length': '7',
+          'content-range': 'bytes 3-9/10',
+        }),
+        body: new ReadableStream({
+          start(c) { c.enqueue(new TextEncoder().encode('xxxxxxx')); c.close(); },
+        }),
+      });
+    });
+    const { size } = await downloadSurah(ENTRY);
+    expect(size).toBe(10);
+    expect(seen).toEqual(['(fresh)', 'bytes=3-']);
+    expect(calls).toBe(2);
+    const cache = await caches.open(AUDIO_CACHE);
+    expect(await (await cache.match(ENTRY.url)).text()).toBe(full);
+  });
+
+  it('gives up after the attempt budget and leaves no trace', async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('down'));
+    await expect(downloadSurah(ENTRY, null, null, { maxAttempts: 2 })).rejects.toThrow('down');
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(isDownloaded(1, 11)).toBe(false);
+  });
+
+  it('restarts clean when the server ignores Range with a 200', async () => {
+    let first = true;
+    globalThis.fetch = vi.fn().mockImplementation(() => {
+      if (first) {
+        first = false;
+        return Promise.resolve({
+          ok: true, status: 200,
+          headers: new Headers({ 'content-type': 'audio/mpeg', 'content-length': '10' }),
+          body: new ReadableStream({
+            start(c) { c.enqueue(new TextEncoder().encode('xxx')); },
+            pull(c) { c.error(new TypeError('dropped')); },
+          }),
+        });
+      }
+      return Promise.resolve(mp3Response('yyyyyyyyyy'));
+    });
+    const { size } = await downloadSurah(ENTRY);
+    // Not 13: the 3 stale bytes were discarded when the server restarted.
+    expect(size).toBe(10);
+    const cache = await caches.open(AUDIO_CACHE);
+    expect(await (await cache.match(ENTRY.url)).text()).toBe('yyyyyyyyyy');
+  });
+
+  it('refuses to store a silently truncated stream', async () => {
+    // A server that closes early produces no error, just a short file.
+    // Storing it would play a truncated surah under a ✓ badge.
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      headers: new Headers({ 'content-type': 'audio/mpeg', 'content-length': '10' }),
+      body: new ReadableStream({
+        start(c) { c.enqueue(new TextEncoder().encode('xxx')); c.close(); },
+      }),
+    });
+    await expect(downloadSurah(ENTRY, null, null, { maxAttempts: 1 }))
+      .rejects.toThrow('truncated');
+    expect(isDownloaded(1, 11)).toBe(false);
+  });
 });
 
 describe('deleteDownload', () => {

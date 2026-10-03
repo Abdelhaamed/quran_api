@@ -66,35 +66,80 @@ export async function requestPersistence() {
  * element and the SW's RangeRequestsPlugin see the same content-type and
  * length they would from the network.
  *
+ * Resumes across dropped connections: on a network failure the loop re-issues
+ * the request with `Range: bytes=N-` and appends, so a 40MB surah on a flaky
+ * phone connection does not restart from zero every time a tower hands off.
+ * The server answers Accept-Ranges: bytes, so 206 is the expected resume
+ * status. A 200 to a ranged request means the server restarted the file, in
+ * which case the partial chunks are discarded and the download restarts clean.
+ *
  * onProgress(receivedBytes, totalBytes|null) fires per chunk. Aborting is the
- * caller's job via the signal; a rejection leaves no registry entry and no
- * partial cache entry behind.
+ * caller's job via the signal; an abort (or an exhausted budget) leaves no
+ * registry entry and no partial cache entry behind.
  */
-export async function downloadSurah({ url, surahId, moshafId, surahName, reciterName }, onProgress, signal) {
+export async function downloadSurah({ url, surahId, moshafId, surahName, reciterName }, onProgress, signal, { maxAttempts = 3 } = {}) {
   const key = downloadKey(surahId, moshafId);
-  const res = await fetch(url, { signal });
-  if (!res.ok || !res.body) {
-    throw new Error(`download failed: HTTP ${res.status}`);
-  }
-  const total = Number(res.headers.get('content-length')) || null;
-  const reader = res.body.getReader();
-  const chunks = [];
+  let chunks = [];
   let received = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    received += value.byteLength;
-    onProgress?.(received, total);
+  let total = null;
+  let contentType = 'audio/mpeg';
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+    try {
+      const headers = received > 0 ? { Range: `bytes=${received}-` } : {};
+      const res = await fetch(url, { signal, headers });
+      if (res.status === 206 && received > 0) {
+        // Resumed: content-length is the REMAINING bytes, the total comes
+        // from content-range (`bytes N-M/TOTAL`).
+        const cr = res.headers.get('content-range') || '';
+        const match = cr.match(/\/(\d+)\s*$/);
+        if (match) total = Number(match[1]);
+      } else if (res.ok && received === 0) {
+        total = Number(res.headers.get('content-length')) || null;
+        contentType = res.headers.get('content-type') || contentType;
+      } else if (res.ok) {
+        // Server ignored the Range and restarted the file: the partial chunks
+        // belong to a prefix the new body repeats, so drop them or the stored
+        // file would contain the start twice.
+        chunks = [];
+        received = 0;
+        total = Number(res.headers.get('content-length')) || null;
+        contentType = res.headers.get('content-type') || contentType;
+      } else {
+        throw new Error(`download failed: HTTP ${res.status}`);
+      }
+      if (!res.body) throw new Error('download failed: empty body');
+      const reader = res.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.byteLength;
+        onProgress?.(received, total);
+      }
+      // A server that closes the stream early produces no error, just a short
+      // file. Storing it would play a truncated surah with a ✓ badge, so a
+      // short read against a known total throws into the resume path instead.
+      if (total != null && received < total) {
+        throw new Error(`download truncated: ${received} of ${total} bytes`);
+      }
+      lastError = null;
+      break;
+    } catch (err) {
+      if (signal?.aborted || err?.name === 'AbortError') throw err;
+      lastError = err;
+    }
   }
-  const headers = new Headers();
-  for (const [k, v] of res.headers) {
-    if (k.toLowerCase() === 'content-encoding') continue;
-    headers.set(k, v);
-  }
-  if (total != null) headers.set('content-length', String(received));
+
+  if (lastError) throw lastError;
+
+  const headers = new Headers({ 'content-type': contentType, 'content-length': String(received) });
   const cache = await caches.open(AUDIO_CACHE);
-  await cache.put(url, new Response(new Blob(chunks, { type: res.headers.get('content-type') || 'audio/mpeg' }), { headers }));
+  await cache.put(url, new Response(new Blob(chunks, { type: contentType }), { headers }));
   const reg = readRegistry();
   reg[key] = { surahId, moshafId, surahName, reciterName, url, size: received, at: Date.now() };
   writeRegistry(reg);
