@@ -82,6 +82,15 @@ registerRoute(
 // Version probe for the update toast. The page cannot read cache names
 // directly in every browser, so it asks.
 self.addEventListener('message', (event) => {
+  // Without this branch the update button is dead: updateSW(true) posts
+  // SKIP_WAITING to the waiting worker, and with injectManifest nobody
+  // handles it unless written here (generateSW injects it automatically).
+  // The symptom was a toast whose button did nothing on phone or web until
+  // the app was deleted and reinstalled.
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+    return;
+  }
   if (event.data?.type === 'AUDIO_KEYS') {
     event.waitUntil(
       (async () => {
