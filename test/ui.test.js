@@ -829,7 +829,7 @@ describe('createFavoritesView', () => {
   it('explains the empty state and offers the way into it', () => {
     const { root, onBrowse } = build();
     expect(qsa('.fav', root)).toHaveLength(0);
-    expect(qs('.empty', root).textContent).toContain('لا توجد سور في المفضلة');
+    expect(qs('.empty', root).textContent).toContain('لا توجد عناصر في المفضلة');
     qs('.btn-primary', root).click();
     expect(onBrowse).toHaveBeenCalled();
   });
@@ -1566,7 +1566,7 @@ describe('app wiring', () => {
     app = await boot();
     app.playAllFavorites();
     expect(qs('#toast').hidden).toBe(false);
-    expect(qs('#toast').textContent).toBe('لا توجد سور في المفضلة');
+    expect(qs('#toast').textContent).toBe('لا توجد عناصر في المفضلة');
     expect(app.store.getState().playback).toBe(null);
   });
 

@@ -34,7 +34,7 @@ const GONE = 'القارئ لم يعد متوفراً';
 // to play. Saying the reader is gone when the favorites list is simply empty
 // sends the user looking for a problem in the wrong place.
 const UNPLAYABLE = 'لا يمكن التشغيل — لا يوجد رابط محفوظ لهذه السورة';
-const NOTHING_SAVED = 'لا توجد سور في المفضلة';
+const NOTHING_SAVED = 'لا توجد عناصر في المفضلة';
 const LOAD_FAILED = 'تعذّر تحميل السورة';
 const PLAY_FAILED = 'تعذّر تحميل السورة. تحقّق من الاتصال.';
 const BLOCKED = 'اضغط تشغيل للسماح بالصوت';

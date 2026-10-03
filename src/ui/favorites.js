@@ -3,7 +3,7 @@ import { sortForPlayback } from '../utils/favorites.js';
 import { matchesAll } from '../utils/arabic.js';
 import { icon } from './icons.js';
 
-const EMPTY_COPY = 'لا توجد سور في المفضلة. اضغط القلب في تبويب «السور» لحفظ سورة بصوت قارئها.';
+const EMPTY_COPY = 'لا توجد عناصر في المفضلة. اضغط القلب في تبويب «السور» لحفظ سورة بصوت قارئها، أو في تبويب «البث» لحفظ قناة.';
 
 const NO_MATCH = 'لا نتائج مطابقة';
 
