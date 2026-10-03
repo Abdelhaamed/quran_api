@@ -25,6 +25,7 @@ import downloadIcon from 'bootstrap-icons/icons/download.svg?raw';
 import chevronDown from 'bootstrap-icons/icons/chevron-down.svg?raw';
 import chevronUp from 'bootstrap-icons/icons/chevron-up.svg?raw';
 import broadcastIcon from 'bootstrap-icons/icons/broadcast.svg?raw';
+import trashIcon from 'bootstrap-icons/icons/trash.svg?raw';
 
 // YouTube-style circular 10-second buttons: a stroked circular arrow around a
 // "10" label. Bootstrap has no "number in a circle" glyph, so these two are
@@ -52,6 +53,7 @@ const ICONS = {
   chevronDown,
   chevronUp,
   broadcast: broadcastIcon,
+  delete: trashIcon,
 };
 
 export function icon(name) {

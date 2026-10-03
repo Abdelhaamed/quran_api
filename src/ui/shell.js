@@ -2,7 +2,7 @@ import { qs, qsa } from '../utils/dom.js';
 import { writeState } from '../state/persist.js';
 import { icon } from './icons.js';
 
-export const TABS = ['reciters', 'surahs', 'favorites', 'radio'];
+export const TABS = ['reciters', 'surahs', 'downloads', 'favorites', 'radio'];
 export const THEMES = ['auto', 'light', 'dark'];
 
 const OFFLINE_COPY = 'لا يوجد اتصال - تتصفح البيانات المحفوظة بالمفضلة';

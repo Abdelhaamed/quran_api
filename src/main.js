@@ -22,6 +22,7 @@ import { createSearch } from './ui/search.js';
 import { createRecitersView } from './ui/reciters.js';
 import { createSurahsView } from './ui/surahs.js';
 import { createFavoritesView } from './ui/favorites.js';
+import { createDownloadsView } from './ui/downloads.js';
 import { createRadioView } from './ui/radio.js';
 import { createPlayer } from './ui/player.js';
 import {
@@ -590,6 +591,41 @@ createFavoritesView({
     else toggleSurah(fav.surahId, fav.moshafId);
   },
   onPlayAll: playAllFavorites,
+  onBrowse: () => store.setState({ activeTab: 'surahs' }),
+});
+
+// A downloaded entry already carries everything playback needs, so it rides
+// the favorites queue path with a synthetic fav: same item shape, same
+// playQueueItem branch, no special-casing downstream. isFavorite still reads
+// the real favorites list, so the player heart tells the truth even for a
+// downloaded surah the user never favorited.
+function playDownloaded(d) {
+  const fav = {
+    kind: 'surah', surahId: d.surahId, moshafId: d.moshafId,
+    surahName: d.surahName, reciterName: d.reciterName, riwayaName: '',
+  };
+  queue.setPlaylist([{ surahId: d.surahId, title: d.surahName, url: d.url, fav }]);
+  queueBinding = { kind: 'downloads', length: 1 };
+  playQueueItem(queue.current);
+}
+
+function playAllDownloaded(list) {
+  if (!list || list.length === 0) return;
+  queue.setPlaylist(list.map((d) => ({
+    surahId: d.surahId, title: d.surahName, url: d.url,
+    fav: {
+      kind: 'surah', surahId: d.surahId, moshafId: d.moshafId,
+      surahName: d.surahName, reciterName: d.reciterName, riwayaName: '',
+    },
+  })));
+  queueBinding = { kind: 'downloads', length: list.length };
+  playQueueItem(queue.current);
+}
+
+createDownloadsView({
+  root: qs('#view-downloads'), store,
+  onPlay: playDownloaded,
+  onPlayAll: playAllDownloaded,
   onBrowse: () => store.setState({ activeTab: 'surahs' }),
 });
 

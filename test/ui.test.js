@@ -202,7 +202,7 @@ describe('createShell', () => {
   });
 
   it('keeps only the selected tab in the tab order', () => {
-    expect(qsa('.tab').map((b) => b.tabIndex)).toEqual([0, -1, -1, -1]);
+    expect(qsa('.tab').map((b) => b.tabIndex)).toEqual([0, -1, -1, -1, -1]);
   });
 
   it('switches panels on click and persists the choice', async () => {
@@ -211,7 +211,7 @@ describe('createShell', () => {
     expect(qs('#view-radio').hidden).toBe(false);
     expect(qs('#view-reciters').hidden).toBe(true);
     expect(qs('.tab[data-tab="radio"]').getAttribute('aria-selected')).toBe('true');
-    expect(qsa('.tab').map((b) => b.tabIndex)).toEqual([-1, -1, -1, 0]);
+    expect(qsa('.tab').map((b) => b.tabIndex)).toEqual([-1, -1, -1, -1, 0]);
     expect(JSON.parse(localStorage.getItem('quran.state.v2')).activeTab).toBe('radio');
   });
 

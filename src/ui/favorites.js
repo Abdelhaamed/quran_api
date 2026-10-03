@@ -1,7 +1,6 @@
 import { h, frag } from '../utils/dom.js';
 import { sortForPlayback } from '../utils/favorites.js';
 import { matchesAll } from '../utils/arabic.js';
-import { downloadedBytes, formatBytes } from '../audio/downloads.js';
 import { icon } from './icons.js';
 
 const EMPTY_COPY = 'لا توجد عناصر في المفضلة. اضغط القلب في تبويب «السور» لحفظ سورة بصوت قارئها، أو في تبويب «البث» لحفظ قناة.';
@@ -47,12 +46,6 @@ export function createFavoritesView({ root, store, onPlay, onRemove, onPlayAll, 
       h('button', { class: 'btn-primary', type: 'button', onclick: () => onPlayAll() },
         'تشغيل الكل'),
     );
-    // Storage meter: the user owns deletion, so they need to see what the
-    // downloads cost. Shown only when something is actually stored.
-    const bytes = downloadedBytes();
-    if (bytes > 0) {
-      head.append(h('span', { class: 'dl-meter' }, `المحمّل: ${formatBytes(bytes)}`));
-    }
 
     // sortForPlayback orders by surah then reciter, and total by the pair, so
     // play-all walks the queue in the order it is shown here.
