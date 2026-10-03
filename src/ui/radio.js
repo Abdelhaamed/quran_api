@@ -28,8 +28,27 @@ const CATEGORIES = [
   { id: 'tarjama', label: 'ترجمات', keys: ['ترجمه'] },
 ];
 
+const OVERRIDES = {
+  'هيثم الجدعاني': 'tilawa',
+  'تكبيرات العيد': 'adhkar',
+  'كتاب الاختيارات الفقهية في مسائل العبادات والمعاملات': 'fatawa',
+  'صحيح البخاري': 'sira',
+  'صحيح مسلم': 'sira',
+  'رياض الصالحين': 'sira',
+  'فضل شهر رمضان': 'fatawa',
+};
+
 export function categorize(name) {
   const text = normalize(name || '');
+  // Exact-name overrides, checked before keywords. Keywords are substrings and
+  // can misfire: "الجدعاني" contains the دعا sequence, so هيثم الجدعاني landed
+  // in أذكار. The rest are user-requested placements that no keyword covers
+  // (تكبيرات العيد) or that belong elsewhere by content (the two Sahihs and
+  // Riyadh as-Salihin read as sira/qasas here, Fadl Ramadan as fatawa).
+  // Compared normalized so hamza variants on either side still hit.
+  for (const [key, id] of Object.entries(OVERRIDES)) {
+    if (text === normalize(key)) return id;
+  }
   for (const c of CATEGORIES) {
     if (!c.keys || c.keys.length === 0) continue;
     if (c.keys.some((k) => text.includes(k))) return c.id;

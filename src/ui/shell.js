@@ -5,7 +5,7 @@ import { icon } from './icons.js';
 export const TABS = ['reciters', 'surahs', 'favorites', 'radio'];
 export const THEMES = ['auto', 'light', 'dark'];
 
-const OFFLINE_COPY = 'لا يوجد اتصال — تتصفّح البيانات المحفوظة';
+const OFFLINE_COPY = 'لا يوجد اتصال - تتصفح البيانات المحفوظة بالمفضلة';
 
 // The pre-paint script in index.html resolves a saved theme the same way.
 // Exported so the test can compare the two rather than trust that they match.

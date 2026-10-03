@@ -46,6 +46,18 @@ describe('categorize', () => {
     expect(categorize(undefined)).toBe('tilawa');
   });
 
+  // Exact-name overrides beat keywords. هيثم الجدعاني contains the دعا
+  // sequence ("الجدعاني"), so keywords alone put a reciter in أذكار.
+  it('applies user-requested placements ahead of keywords', () => {
+    expect(categorize('هيثم الجدعاني')).toBe('tilawa');
+    expect(categorize('تكبيرات العيد')).toBe('adhkar');
+    expect(categorize('كتاب الاختيارات الفقهية في مسائل العبادات والمعاملات')).toBe('fatawa');
+    expect(categorize('صحيح البخاري')).toBe('sira');
+    expect(categorize('صحيح مسلم')).toBe('sira');
+    expect(categorize('رياض الصالحين')).toBe('sira');
+    expect(categorize('فضل شهر رمضان')).toBe('fatawa');
+  });
+
   it('resolves a label for every category id', () => {
     for (const id of ['all', 'tilawa', 'tafsir', 'adhkar', 'sira', 'fatawa', 'stations', 'tarjama']) {
       expect(categoryLabel(id).length).toBeGreaterThan(0);

@@ -299,9 +299,12 @@
 .row-name { font-size: var(--fs-sm); }
 
 /* A grid, not a bare block, so the favorites empty state can put its button
-   under the explanation with a real gap. */
+   under the explanation with a real gap. Vertically centered in the viewport
+   area rather than clinging to the top, which reads as broken layout on a
+   tall desktop screen. */
 .empty { color: var(--text-muted); text-align: center; padding: var(--sp-6) var(--sp-4);
-  display: grid; gap: var(--sp-4); justify-items: center; }
+  display: grid; gap: var(--sp-4); justify-items: center; align-content: center;
+  min-block-size: 40svh; }
 .fav-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
 .fav-count { font-size: var(--fs-sm); color: var(--text-muted); font-weight: 400; }
 .btn-primary { min-block-size: var(--tap); padding-inline: var(--sp-4); border-radius: var(--r-full);

@@ -341,7 +341,7 @@ describe('createShell', () => {
       store.setState({ offline: true });
       await flush();
       expect(writes).toHaveLength(1);
-      expect(writes[0]).toBe('لا يوجد اتصال — تتصفّح البيانات المحفوظة');
+      expect(writes[0]).toBe('لا يوجد اتصال - تتصفح البيانات المحفوظة بالمفضلة');
       expect(banner.hidden).toBe(false);
 
       store.setState({ reciters: RECITERS });
